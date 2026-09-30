@@ -1,0 +1,40 @@
+[project]
+name = "emg-dashboard"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "basictdf>=0.1.14",
+    "kagglehub>=0.3,<1",
+    "matplotlib>=3.9,<4",
+    "numpy>=1.22,<2",
+    "opencv-python>=4.10.0.84",
+    "pandas>=2.2,<4",
+    "plotly>=6,<7",
+    "scipy>=1.14,<2",
+    "streamlit>=1.50,<2",
+]
+
+[project.scripts]
+emg-dashboard = "emg_dashboard:main"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<10",
+    "ruff>=0.12,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+ignore = ["E501"]

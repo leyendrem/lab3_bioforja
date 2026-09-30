@@ -1,0 +1,531 @@
+\documentclass[11pt,spanish]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish,es-nodecimaldot]{babel}
+\usepackage{geometry}
+\geometry{letterpaper, margin=1in}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows.meta,positioning,fit}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{url}
+
+\definecolor{navyblue}{RGB}{20,40,80}
+\definecolor{accentblue}{RGB}{41,128,185}
+\definecolor{lightgray}{gray}{0.95}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=navyblue,
+    citecolor=accentblue,
+    urlcolor=accentblue
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textcolor{gray}{Laboratorio 3: Dashboard reproducible de EMG}}
+\fancyhead[R]{\small\textcolor{gray}{Octubre de 2026}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\lstset{
+    backgroundcolor=\color{lightgray},
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    columns=fullflexible,
+    frame=single,
+    rulecolor=\color{gray!40},
+    keywordstyle=\color{navyblue}\bfseries,
+    commentstyle=\color{green!50!black}\itshape,
+    showstringspaces=false,
+    language=Python
+}
+
+\usepackage{titlesec}
+\titleformat{\section}{\color{navyblue}\normalfont\Large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\color{accentblue}\normalfont\large\bfseries}{\thesubsection}{1em}{}
+
+\title{\textbf{\large Laboratorio 3: Dashboard interactivo y análisis reproducible\\de electromiografía de superficie (sEMG)}}
+\author{\textbf{Cristian Stiven Capera C. \quad Ana Sofía García G. \quad Jeimmy Andrea Gonzáles G.}\\
+\textbf{Karol Mariana Gutiérrez G. \quad Brayan Andrés Ruiz C.}}
+\date{01 de Octubre de 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Este informe documenta la versión actualizada del proyecto de dashboard para electromiografía de superficie (sEMG), construido alrededor de registros BTS Bioengineering en formato \texttt{.tdf}. El sistema carga y valida los registros, conserva su trazabilidad, aplica un pipeline explícito de eliminación de componente DC, filtrado pasa-banda, rectificación y extracción de envolvente, detecta segmentos de activación y calcula descriptores de amplitud, duración y frecuencia: RMS, \%MVC, iEMG, longitud de onda (WL), frecuencia mediana (MDF) y variables de activación. La aplicación se implementa con Streamlit y Plotly y mantiene los datos originales en \texttt{data/raw/}. 
+Una parte central del informe es la justificación de los parámetros fijados manualmente en el código. Se distinguen tres tipos de justificación: valores derivados de la adquisición (por ejemplo, $f_s=1000$ Hz), valores compatibles con prácticas establecidas para sEMG (por ejemplo, el rango aproximado 20--500 Hz), y decisiones empíricas de este conjunto de flexiones de brazos (por ejemplo, RMS de 200 ms y MDF de 2 s). Ninguno de estos parámetros constituye un umbral clínico para diagnosticar fatiga, sobreesfuerzo o lesión.
+\end{abstract}
+
+\section{Problema, usuario, pregunta y límite clínico}
+
+La sEMG permite observar indirectamente la actividad eléctrica asociada con la activación de unidades motoras durante una tarea. Sin embargo, la amplitud y el contenido espectral de la señal dependen también de factores anatómicos, de adquisición y de colocación de electrodos. La señal puede contener artefactos de movimiento, interferencia eléctrica, cambios de contacto electrodo-piel y \textit{cross-talk}. Por ello, interpretar directamente una señal cruda puede ocultar decisiones que afectan el resultado \cite{hug2020,defreitas2020}.
+El proyecto se plantea para un escenario de rehabilitación en el que se registran señales durante \textbf{flexiones de brazos}. El usuario final planteado por el proyecto es un profesional de rehabilitación física que necesita explorar si existen patrones cuantitativos de activación que merezcan revisión.
+
+\subsection*{Pregunta rectora}
+\textit{¿Cómo transformar una señal EMG adquirida durante una actividad física en un conjunto reducido de métricas y visualizaciones que un especialista pueda interpretar, sin ocultar las decisiones de procesamiento que condicionan esos resultados?}
+
+\subsection*{Objetivo}
+Construir una herramienta reproducible que permita:
+\begin{enumerate}
+    \item cargar exclusivamente registros \texttt{.tdf} de EMG;
+    \item verificar la estructura y calidad básica del registro;
+    \item visualizar señal cruda, señal procesada, envolvente y espectro;
+    \item cuantificar amplitud, actividad acumulada, contenido espectral y activaciones;
+    \item estudiar la sensibilidad de los resultados a las ventanas de análisis;
+    \item exportar resultados derivados y metadatos sin modificar los archivos originales.
+\end{enumerate}
+
+\subsection*{Límite clínico}
+El dashboard \textbf{no diagnostica} fatiga, lesión, sobreesfuerzo ni mala técnica. Un aumento de RMS no equivale por sí solo a mayor fuerza; una activación prolongada no demuestra una ejecución incorrecta; y un descenso de MDF no constituye por sí solo un diagnóstico de fatiga. Estas variables deben interpretarse junto con la tarea, la biomecánica, la calidad de adquisición y, cuando sea pertinente, una referencia normalizada como MVC.
+
+\section{Datos y estructura del proyecto}
+
+\subsection{Registros utilizados}
+
+La carpeta \texttt{data/raw/} contiene tres registros BTS Bioengineering TDF:
+\begin{itemize}
+    \item \texttt{0033\textasciitilde aa\textasciitilde flexiones\_brazos.tdf};
+    \item \texttt{0033\textasciitilde aa\textasciitilde flexiones\_brazos2.tdf};
+    \item \texttt{0033\textasciitilde aa\textasciitilde flexiones\_brazos3.tdf}.
+\end{itemize}
+
+De acuerdo con la documentación incluida en el repositorio, cada registro contiene ocho canales sEMG asociados con bíceps, deltoides anterior, pectoral mayor y tríceps, bilateralmente, y presenta una duración aproximada de 61--65 s. La frecuencia de muestreo leída del bloque EMG es de \textbf{1000 Hz}. Por tanto, la frecuencia de Nyquist es:
+\begin{equation}
+f_N=\frac{f_s}{2}=500\ \mathrm{Hz}.
+\end{equation}
+
+La frecuencia de muestreo no se fija como una constante científica dentro del lector: se obtiene desde \texttt{emg.frequency} del TDF. Esto es importante porque evita convertir un valor supuesto en un metadato de adquisición.
+
+\subsection{Unidad de amplitud}
+
+El código conserva los valores de amplitud entregados por el TDF. La documentación del proyecto indica que el bloque no declara explícitamente la unidad y que los valores observados son consistentes con voltios. Por tanto, esta se deja explícitamente como un punto que debe confirmarse con el equipo de adquisición.
+Esta precaución es especialmente importante para \%MVC: el cociente solo es interpretable si el RMS de referencia MVC y el RMS de la tarea están expresados en las mismas unidades y bajo un protocolo comparable.
+
+\subsection{Contrato de datos}
+
+El módulo \texttt{io.py} normaliza la información a las columnas mínimas:
+\begin{center}
+\texttt{time\_s}, \quad \texttt{emg}, \quad \texttt{channel}, \quad \texttt{session},
+\end{center}
+con \texttt{event} como campo adicional. El tiempo se construye como:
+\begin{equation}
+t_n=t_0+\frac{n}{f_s},
+\end{equation}
+donde $t_0$ es \texttt{startTime} del TDF.
+
+\subsection{Arquitectura funcional}
+
+El flujo global implementado es:
+\begin{center}
+\textbf{TDF $\rightarrow$ carga $\rightarrow$ validación $\rightarrow$ calidad $\rightarrow$ preprocesamiento $\rightarrow$ segmentación $\rightarrow$ métricas $\rightarrow$ visualización}
+\end{center}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm and 0.8cm,
+    box/.style={rectangle,draw=navyblue,rounded corners,align=center,minimum width=2.8cm,minimum height=0.9cm,font=\small},
+    arrow/.style={-{Latex[length=2mm]},thick,color=accentblue}
+]
+\node[box] (tdf) {Archivos\\\texttt{.tdf}};
+\node[box,right=of tdf] (io) {\texttt{io.py}\\carga + contrato};
+\node[box,right=of io] (val) {\texttt{data\_validation.py}\\muestreo + calidad};
+\node[box,below=of io] (prep) {\texttt{preprocessing\_metrics.py}\\DC + banda + envolvente};
+\node[box,right=of prep] (met) {\texttt{metrics.py}\\RMS + MDF + activaciones};
+\node[box,right=of met] (vis) {\texttt{visualization.py}\\Plotly};
+\node[box,below=of prep] (app) {\texttt{app.py}\\Streamlit / orquestación};
+\node[box,right=of app] (batch) {\texttt{reproduce.py}\\reproducción por lotes};
+
+\draw[arrow] (tdf)--(io);
+\draw[arrow] (io)--(val);
+\draw[arrow] (io)--(prep);
+\draw[arrow] (prep)--(met);
+\draw[arrow] (met)--(vis);
+\draw[arrow] (val)--(app);
+\draw[arrow] (met)--(app);
+\draw[arrow] (vis)--(app);
+\draw[arrow] (io)--(app);
+\draw[arrow] (io)--(batch);
+\end{tikzpicture}
+\caption{Flujo funcional de la versión actualizada del dashboard.}
+\label{fig:pipeline}
+\end{figure}
+
+\section{Fisiología de la señal sEMG}
+
+La sEMG es la superposición de potenciales de acción de múltiples unidades motoras captados por electrodos sobre la superficie de la piel. La señal depende de la activación neural, la conducción de los potenciales a lo largo de las fibras, la geometría del músculo, su interacción con otros vecinos y de los electrodos.
+Durante una flexión de brazos, músculos como pectoral mayor, tríceps, deltoides anterior y bíceps pueden contribuir con patrones de activación que cambian a lo largo de las fases concéntrica, excéntrica y de transición. Por ello, una señal de una tarea dinámica es inherentemente no estacionaria.
+
+\subsection{Relación entre amplitud y activación}
+
+El RMS resume la magnitud de la señal en una ventana:
+\begin{equation}
+RMS=\sqrt{\frac{1}{N}\sum_{n=1}^{N}x_n^2}.
+\end{equation}
+La amplitud sEMG puede aumentar con cambios en el número de unidades motoras activas y sus tasas de descarga, pero también cambia por geometría, electrodos y otros factores. Por ello, RMS es un \textbf{descriptor de actividad eléctrica}, no una medida directa de fuerza o daño tisular \cite{hug2020,defreitas2020}.
+
+\subsection{Contenido espectral y MDF}
+
+La frecuencia mediana es la frecuencia que divide en dos partes iguales la potencia espectral acumulada:
+\begin{equation}
+\int_{f_{\min}}^{MDF}P(f)\,df
+=
+\frac{1}{2}\int_{f_{\min}}^{f_{\max}}P(f)\,df.
+\end{equation}
+
+En contracciones sostenidas y controladas, la fatiga periférica puede asociarse con disminución de la velocidad de conducción de las fibras musculares y desplazamiento del espectro hacia frecuencias menores, acompañado frecuentemente de cambios de amplitud \cite{hug2020}. Sin embargo, en contracciones dinámicas existen cambios de geometría, fuerza, reclutamiento y movimiento del electrodo que pueden producir variaciones espectrales independientes de la fatiga. Por eso el presente proyecto usa MDF como \textbf{indicador exploratorio} y no como diagnóstico \cite{hug2024,zwarts1999}.
+
+\section{Preprocesamiento implementado}
+
+\subsection{Eliminación de componente DC}
+
+El código calcula:
+\begin{equation}
+x_{DC}(n)=x(n)-\overline{x}.
+\end{equation}
+El objetivo es centrar la señal alrededor de cero antes del filtrado. Esta operación no pretende eliminar actividad fisiológica de una frecuencia concreta; corrige un desplazamiento constante de la señal.
+
+\subsection{Filtro pasa-banda}
+
+El pipeline utiliza, por defecto, un Butterworth de cuarto orden con:
+\begin{equation}
+20\ \mathrm{Hz}\leq f\leq450\ \mathrm{Hz}.
+\end{equation}
+
+La literatura de sEMG sitúa habitualmente el filtrado pasa-banda alrededor de 20-500Hz, con variaciones según adquisición y objetivo. 
+La elección de 450 Hz, en vez de 500 Hz, tiene además una justificación técnica: un corte exactamente en Nyquist no es una configuración válida para un filtro digital convencional, pues se requiere $f_{high}<f_s/2$. El valor de 450 Hz conserva el contenido de interés y proporciona un margen de 50 Hz frente al límite de Nyquist.
+El orden 4 es un compromiso práctico. Con él se produce una transición suficientemente definida para separar componentes lentas y altas, sin convertir el procesamiento en un filtro excesivamente abrupto. No debe interpretarse como un estándar fisiológicom, pues es una decisión de diseño.
+
+El filtro se implementa con \texttt{sosfiltfilt}, por lo que tiene fase cero. Esto evita un desplazamiento temporal introducido por la fase, pero requiere procesamiento hacia adelante y hacia atrás; por tanto, el método es apropiado para análisis \textbf{offline}, no para una implementación causal de tiempo real.
+
+\subsection{Rectificación}
+
+La rectificación es:
+\begin{equation}
+x_{rect}(n)=|x_{filt}(n)|.
+\end{equation}
+Su función es transformar la señal bipolar en una magnitud no negativa que pueda suavizarse para obtener una envolvente relacionada con el perfil temporal de activación.
+
+\subsection{Envolvente}
+
+Después de rectificar, se aplica un pasa-bajas de \textbf{5 Hz} y orden 4:
+\begin{equation}
+e(t)=LPF_{5\,Hz}\{|x_{filt}(t)|\}.
+\end{equation}
+
+En este dataset, las repeticiones de flexiones tienen una escala temporal del orden de segundos. Un corte de 5 Hz permite seguir cambios de activación de varias décimas de segundo sin conservar gran parte de las oscilaciones rápidas de la señal rectificada.
+El orden 4 se conserva por consistencia con el filtro pasa-banda y proporciona una transición definida sin convertir la envolvente en un detector instantáneo.
+
+%\subsection{Notch de 60 Hz}
+
+%El código permite activar un notch de frecuencia central configurable, por defecto \textbf{60 Hz}, con ancho de banda de \textbf{2 Hz} y orden \textbf{2}. Sin embargo, el procesamiento predeterminado es \textbf{sin notch}.
+%La frecuencia de 60 Hz está justificada técnicamente porque la frecuencia estándar del sistema eléctrico colombiano es 60 Hz \cite{creg2026}. La decisión de \textbf{no aplicarlo automáticamente} es más importante: un notch puede eliminar interferencia de red, pero también puede eliminar contenido fisiológico útil alrededor de 60 Hz y distorsionar el espectro. La literatura recomienda usarlo cuando exista evidencia de interferencia, no como una etapa automática universal.
+%El proyecto incluye una auditoría que calcula, mediante Welch, el cociente entre la potencia alrededor de 60 Hz y la mediana de su vecindario. Se fija:
+%\begin{itemize}
+%    \item ventana espectral de 2 s;
+%    \item tolerancia de $\pm1$ Hz alrededor de la frecuencia objetivo;
+%    \item vecindario de $\pm5$ Hz;
+%    \item umbral de decisión de cociente $>3.5$.
+%\end{itemize}
+%El valor 3.5 es una \textbf{heurística técnica del proyecto}, no un umbral fisiológico universal. La documentación del proyecto reporta cocientes de aproximadamente 0.79--1.42 para los canales evaluados, muy por debajo de 3.5; por ello la configuración base no utiliza notch.
+
+\section{Métricas de amplitud, actividad y espectro}
+
+\subsection{RMS móvil: 200 ms}
+
+La función \texttt{moving\_rms} usa por defecto una ventana centrada de \textbf{200 ms}. La ventana equivale a:
+\begin{equation}
+N_{RMS}=0.200\,s\times1000\,Hz=200\ \text{muestras}.
+\end{equation}
+
+La justificación es especialmente relevante porque las flexiones son una tarea dinámica. Ventanas muy cortas siguen cambios rápidos pero presentan mayor variabilidad; ventanas largas estabilizan la estimación pero pueden mezclar fases de una repetición.
+Además, el proyecto incorpora un análisis de sensibilidad con 100, 200 y 400 ms. La documentación interna reporta, para un ejemplo del registro 1, coeficientes de variación aproximadamente 0.67, 0.63 y 0.59, respectivamente. Por tanto:
+\begin{itemize}
+    \item 100 ms ofrece más resolución temporal, pero una estimación más variable;
+    \item 200 ms reduce parte de la variabilidad sin perder la escala temporal de una repetición;
+    \item 400 ms es más estable, pero comienza a mezclar fases de la contracción.
+\end{itemize}
+Así, 200 ms se presenta como \textbf{elección empírica para este dataset}, no como un valor universal.
+
+\subsection{iEMG}
+
+La integral EMG se calcula como:
+\begin{equation}
+iEMG=\frac{\sum_n |x_n|}{f_s}.
+\end{equation}
+Es proporcional a la actividad absoluta acumulada y depende de la duración del segmento. Por ello no debe compararse directamente entre segmentos de distinta duración sin normalización temporal o control del intervalo.
+
+\subsection{Longitud de onda}
+
+La longitud de onda es:
+\begin{equation}
+WL=\sum_{n=1}^{N-1}|x_{n+1}-x_n|.
+\end{equation}
+Resume cuánto cambia la señal a lo largo del intervalo. Es sensible a cambios rápidos y también al ruido, por lo que debe interpretarse junto con la evaluación de calidad.
+
+\subsection{\%MVC}
+
+Cuando existe una referencia válida:
+\begin{equation}
+\%MVC=100\frac{RMS_{segmento}}{RMS_{MVC}}.
+\end{equation}
+El dashboard no inventa una MVC: si no se proporciona una referencia compatible, devuelve ``Sin referencia''. Esto sigue el principio de que la normalización permite comparar magnitudes entre condiciones, pero requiere una referencia y un protocolo apropiados.
+
+\subsection{MDF con ventana de 2 s y solapamiento de 50\%}
+
+La tendencia MDF usa por defecto:
+\begin{itemize}
+    \item ventana de \textbf{2 s};
+    \item solapamiento de \textbf{50\%};
+    \item desplazamiento efectivo de 1 s;
+    \item estimación de PSD de Welch.
+\end{itemize}
+
+Con $f_s=1000$ Hz, 2 s corresponden a 2000 muestras. En una PSD discretizada, la separación aproximada entre bins antes de considerar detalles del estimador es:
+\begin{equation}
+\Delta f\approx\frac{f_s}{N}=\frac{1000}{2000}=0.5\ \mathrm{Hz}.
+\end{equation}
+
+El valor de 2 s se escogió porque una ventana demasiado corta produce una estimación espectral más variable, mientras que una demasiado larga mezcla varias fases de una tarea dinámica y reduce la capacidad de localizar cambios. El análisis de sensibilidad del propio proyecto compara 1, 2 y 4 s: el README reporta, para un ejemplo, CV de MDF de aproximadamente 11.6\%, 9.1\% y 7.4\%, respectivamente. La ventana de 4 s es más estable pero deja pocas ventanas para seguir una sesión y puede violar con mayor facilidad la estacionariedad local. La de 1 s ofrece más resolución temporal, pero menor resolución frecuencial y mayor variabilidad.
+El solapamiento de 50\% es un compromiso estándar de estimación: genera una nueva estimación cada 1 s para una ventana de 2 s, aumentando la densidad temporal sin llegar al costo de un solapamiento casi completo. Debe recordarse que las estimaciones consecutivas dejan de ser independientes debido al solapamiento.
+
+\section{Detección de activaciones}
+
+La activación se calcula sobre la envolvente. Si no se proporciona un umbral externo, el código utiliza:
+\begin{equation}
+T=\operatorname{mediana}(B)+k(1.4826)\operatorname{MAD}(B),
+\end{equation}
+donde $B$ es el primer segundo de la envolvente y $k=3$ por defecto.
+
+\subsection{Por qué 1 s de línea base}
+
+Se usa \textbf{1 s} porque ofrece suficientes muestras para estimar una línea base robusta a 1000 Hz y es compatible con una escala temporal corta frente a una sesión de más de un minuto. Sin embargo, el código presupone que el inicio del registro representa razonablemente una condición de baja actividad. Si el primer segundo contiene una contracción, el umbral aumenta y puede perder activaciones. Por tanto, este valor es una \textbf{decisión metodológica condicionada al protocolo}, no una constante clínica.
+
+\subsection{Por qué MAD y el factor 1.4826}
+
+La MAD es:
+\begin{equation}
+MAD=\operatorname{mediana}(|x-\operatorname{mediana}(x)|).
+\end{equation}
+El factor 1.4826 convierte aproximadamente la MAD en una escala comparable a la desviación estándar bajo supuestos gaussianos. Su uso hace al umbral menos sensible a valores extremos que una media más desviación estándar.
+
+\subsection{Por qué $k=3$}
+
+El multiplicador \textbf{3} proporciona un criterio relativamente conservador: la envolvente debe separarse claramente de la variabilidad de la línea base para ser marcada como activa. Es una heurística transparente, configurable entre 1 y 8 en la interfaz, y no debe interpretarse como un umbral fisiológico universal.
+
+\subsection{Duración mínima de 0.10 s}
+
+La duración mínima es \textbf{100 ms}. A 1000 Hz equivale a 100 muestras. Su propósito es evitar que fluctuaciones aisladas de la envolvente sean contadas como contracciones completas. Es suficientemente corta para no perder una activación breve, pero filtra oscilaciones muy rápidas. En el código, una prueba explícita confirma que un evento de 10 ms se descarta con este parámetro.
+
+\subsection{Brecha de fusión de 0.10 s}
+
+Las activaciones separadas por $\leq100$ ms se fusionan. Esta decisión evita fragmentar una misma activación cuando la envolvente cruza brevemente el umbral hacia abajo. Al igual que el resto de los parámetros de segmentación, es una heurística y debe validarse visualmente frente a la señal y a las fases biomecánicas.
+
+\section{Calidad y validación}
+
+El módulo \texttt{data\_validation.py} proporciona:
+\begin{itemize}
+    \item \texttt{sampling\_report}: frecuencia configurada, tiempos únicos, duplicados, $\Delta t$ mediano, CV de $\Delta t$ y duración;
+    \item \texttt{channel\_quality}: fracción válida, fracción NaN, señal plana, saturación, mínimo, máximo, media y desviación estándar;
+%    \item \texttt{detect\_powerline\_interference}: evidencia espectral de una línea de red.
+\end{itemize}
+
+El cálculo de calidad no reemplaza una inspección biomecánica. Una señal plana puede ser compatible con desconexión, pero la lógica actual solo reporta el patrón; no convierte automáticamente ese patrón en una causa física única.
+%La función de interferencia usa \textbf{3.5} como razón de potencia pico/fondo. Como este número no proviene de una ley fisiológica, debe considerarse un parámetro de decisión técnica y documentarse junto con los resultados.
+
+\section{Parámetros configurables: auditoría completa}
+
+La Tabla \ref{tab:parametros} reúne los valores fijados manualmente encontrados en la aplicación y en los módulos de procesamiento. Se diferencia entre \textbf{dato de adquisición}, \textbf{decisión basada en literatura}, \textbf{decisión empírica del dataset}, \textbf{heurística} y \textbf{demostración/software}. Esta distinción evita presentar como ``fisiológico'' un número que en realidad es una elección de ingeniería.
+
+\begin{longtable}{p{3.2cm}p{1.7cm}p{2.2cm}p{7.0cm}}
+\caption{Auditoría de parámetros manuales y justificación.}
+\label{tab:parametros}\\
+\toprule
+\textbf{Parámetro} & \textbf{Valor} & \textbf{Tipo} & \textbf{Justificación}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Parámetro} & \textbf{Valor} & \textbf{Tipo} & \textbf{Justificación}\\
+\midrule
+\endhead
+Frecuencia de muestreo del TDF & 1000 Hz & Adquisición & No es un valor inventado por el dashboard: se lee del bloque EMG. Permite representar contenido hasta 500 Hz por Nyquist.\\
+Pasa-altas & 20 Hz & Literatura + dataset & Es consistente con el rango habitual de sEMG y reduce movimiento/deriva de baja frecuencia. El README documenta que parte apreciable de la potencia está por debajo de 20 Hz.\\
+Pasa-bajas & 450 Hz & Literatura + técnica & Conserva el contenido mioeléctrico útil y deja 50 Hz de margen respecto de Nyquist.\\
+Orden pasa-banda & 4 & Ingeniería & Compromiso entre selectividad de transición y complejidad; no es un umbral fisiológico.\\
+Envolvente LP & 5 Hz & Fisiología + dataset & La envolvente sigue la dinámica de activación, mucho más lenta que las oscilaciones EMG. El análisis interno muestra que 1 Hz fusiona repeticiones y que 5 Hz conserva su separación.\\
+Orden envolvente & 4 & Ingeniería & Proporciona transición definida y mantiene coherencia con el filtro principal.\\
+Ventana RMS & 200 ms & Dataset + método & Equilibra estabilidad y resolución temporal en una tarea dinámica. El proyecto incluye sensibilidad 100/200/400 ms.\\
+Ventanas RMS de sensibilidad & 100/200/400 ms & Diseño experimental & Permiten observar explícitamente el compromiso entre ruido de estimación y mezcla temporal de fases.\\
+Ventana MDF & 2 s & Dataset + espectral & Ofrece $\Delta f\approx0.5$ Hz a 1000 Hz y, según la sensibilidad interna, menor variabilidad que 1 s sin mezclar tantas repeticiones como 4 s.\\
+Ventanas MDF de sensibilidad & 1/2/4 s & Diseño experimental & Evalúan resolución temporal, resolución frecuencial y estacionariedad local.\\
+Solapamiento MDF & 50\% & Técnica & Produce un nuevo estimador cada 1 s con ventana de 2 s y reduce la pérdida de resolución temporal.\\
+Mínimo espectral & 16 muestras & Técnica/software & Evita intentar estimar una PSD con segmentos demasiado pequeños. Es una condición computacional mínima, no fisiológica.\\
+Muestras mínimas RMS & 10 & Software & Impide generar una estadística de amplitud sobre una señal extremadamente corta.\\
+Muestras mínimas WL & 2 & Matemática & Se necesita al menos un incremento $x[n+1]-x[n]$.\\
+Línea base activación & 1 s & Heurística + protocolo & Da una muestra suficientemente grande de reposo/actividad inicial; depende de que el registro comience en baja actividad.\\
+%Multiplicador MAD & 3 & Heurística robusta & Separa activaciones de fluctuaciones de línea base sin depender de un umbral absoluto de voltaje.\\
+%Factor MAD & 1.4826 & Estadística & Escala la MAD para hacerla comparable con una desviación estándar bajo supuestos gaussianos.\\
+Duración mínima activación & 0.10 s & Heurística fisiológica & Elimina cruces fugaces del umbral y conserva activaciones del orden de décimas de segundo.\\
+\%MVC & 100$\times$RMS/RMS$_{MVC}$ & Normalización & La referencia MVC permite expresar amplitud relativa; no se reporta si no existe una MVC compatible.\\
+Referencia MVC por defecto & 0 & Seguridad metodológica & El cero representa ``sin referencia'', no una MVC real. Evita inventar una normalización clínica.\\
+Escala logarítmica del espectro & \texttt{False} & Visualización & Se mantiene lineal por defecto para facilitar lectura directa; el usuario puede activar log para explorar varios órdenes de magnitud.\\
+\bottomrule
+\end{longtable}
+
+\subsection{Parámetros de demostración que no deben confundirse con parámetros fisiológicos}
+
+La función \texttt{demo\_data()} contiene valores artificiales: $f_s=1000$ Hz, duración 30 s, semilla aleatoria 42, portadora de 90 Hz, ruido gaussiano con escala 0.035, deriva de 0.4 Hz y amplitud 0.01, activaciones de 1.5 s iniciadas cada 3 s desde aproximadamente 2 s. Estos valores \textbf{no describen al paciente ni los registros reales}; solo generan una señal sintética para que la interfaz pueda abrirse sin un TDF.
+La semilla 42 es una decisión de reproducibilidad computacional, no una propiedad fisiológica.
+
+\section{Funciones y responsabilidades del código}
+
+\begin{longtable}{p{3.5cm}p{4.2cm}p{6.8cm}}
+\caption{Mapa funcional de la implementación.}
+\label{tab:functions}\\
+\toprule
+\textbf{Módulo} & \textbf{Función} & \textbf{Responsabilidad}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Módulo} & \textbf{Función} & \textbf{Responsabilidad}\\
+\midrule
+\endhead
+\texttt{io.py} & \texttt{build\_emg\_dataframe} & Construye el DataFrame común a partir de las pistas EMG y $f_s$.\\
+\texttt{io.py} & \texttt{load\_bts\_tdf} & Lee el TDF, extrae frecuencia, inicio, muestras, canales y eventos.\\
+\texttt{io.py} & \texttt{load\_file} & Restringe la entrada a \texttt{.tdf}.\\
+\texttt{io.py} & \texttt{load\_uploaded\_file} & Gestiona archivos cargados desde Streamlit mediante un temporal.\\
+\texttt{io.py} & \texttt{validate\_contract} & Verifica columnas obligatorias, tiempos, datos EMG y nombres de canal.\\
+\texttt{data\_validation.py} & \texttt{sampling\_report} & Resume regularidad temporal y duración.\\
+\texttt{data\_validation.py} & \texttt{channel\_quality} & Resume finitud, NaN, señal plana, saturación y estadísticos descriptivos.\\
+\texttt{preprocessing\_metrics.py} & \texttt{as\_float} & Convierte entradas a arreglos numéricos.\\
+\texttt{preprocessing\_metrics.py} & \texttt{remove\_dc} & Centra la señal restando su media.\\
+\texttt{preprocessing\_metrics.py} & \texttt{bandpass\_emg} & Aplica el pasa-banda Butterworth.\\
+\texttt{preprocessing\_metrics.py} & \texttt{notch\_filter} & Aplica la muesca configurable de red.\\
+\texttt{preprocessing\_metrics.py} & \texttt{rectify} & Calcula valor absoluto.\\
+\texttt{preprocessing\_metrics.py} & \texttt{lowpass\_envelope} & Obtiene la envolvente mediante pasa-bajas.\\
+\texttt{preprocessing\_metrics.py} & \texttt{preprocess\_emg} & Orquesta todas las etapas y devuelve cada etapa para trazabilidad.\\
+\texttt{metrics.py} & \texttt{moving\_rms} & RMS móvil centrado.\\
+\texttt{metrics.py} & \texttt{rms} & RMS de un segmento.\\
+\texttt{metrics.py} & \texttt{iemg} & Actividad absoluta acumulada.\\
+\texttt{metrics.py} & \texttt{waveform\_length} & Longitud de onda.\\
+\texttt{metrics.py} & \texttt{percent\_mvc} & Normalización relativa a MVC.\\
+\texttt{metrics.py} & \texttt{median\_frequency} & MDF mediante PSD de Welch.\\
+\texttt{metrics.py} & \texttt{median\_frequency\_trend} & MDF por ventanas deslizantes.\\
+\texttt{metrics.py} & \texttt{activation\_threshold} & Estima el umbral robusto con mediana y MAD.\\
+\texttt{metrics.py} & \texttt{activation\_segments} & Encuentra activaciones, aplica duración mínima y fusiona brechas.\\
+\texttt{metrics.py} & \texttt{segment\_summary} & Consolida RMS, \%MVC, iEMG, WL, envolvente y MDF.\\
+\texttt{metrics.py} & \texttt{window\_sensitivity} & Compara configuraciones de ventanas.\\
+\texttt{visualization.py} & \texttt{signal\_figure} & Grafica señal cruda, filtrada, envolvente y activaciones.\\
+\texttt{visualization.py} & \texttt{trend\_figure} & Grafica tendencias temporales.\\
+\texttt{visualization.py} & \texttt{spectrum\_figure} & Grafica PSD.\\
+\texttt{data\_filtration.py} & \texttt{process\_and\_save\_signals} & Procesa todos los TDF y exporta CSV derivados.\\
+\texttt{data\_compilation.py} & \texttt{process\_and\_export\_summary} & Valida registros y exporta calidad/metadatos.\\
+\bottomrule
+\end{longtable}
+
+\section{Dashboard y flujo de uso}
+
+La interfaz de \texttt{app.py} se organiza en cuatro bloques:
+\begin{enumerate}
+    \item \textbf{Datos:} carga de un TDF, o registro sintético demostrativo;
+    \item \textbf{Procesamiento:} frecuencia de corte, notch y envolvente;
+    \item \textbf{Ventanas:} RMS, MDF y segmentación de activaciones;
+    \item \textbf{Referencia MVC:} valor opcional para normalización.
+\end{enumerate}
+
+Después se seleccionan sesión, canal e intervalo temporal. El canal completo se procesa primero y posteriormente se recorta el intervalo seleccionado. Esta decisión reduce transitorios de borde derivados de aplicar un filtro de fase cero únicamente al fragmento visualizado.
+
+El dashboard presenta:
+\begin{itemize}
+    \item RMS, \%MVC, MDF, iEMG y número de activaciones;
+    \item señal cruda sin DC, filtrada y envolvente;
+    \item tendencia de RMS;
+    \item tendencia de MDF;
+    \item espectro de potencia;
+    \item sensibilidad de ventanas;
+    \item tabla de activaciones;
+    \item reporte de calidad;
+    \item vector de características para una clasificación futura.
+\end{itemize}
+
+\section{Clasificación de actividades}
+
+El vector generado por la aplicación contiene:
+\begin{center}
+\texttt{RMS, \%MVC, MDF, iEMG, WL, n\_activations, mean\_activation\_duration}.
+\end{center}
+
+Estas variables son candidatas a alimentar un clasificador de actividades. Sin embargo, la versión actual \textbf{no entrena un modelo}, porque los registros incluidos no aportan un conjunto de etiquetas de actividad suficientemente estructurado para validar un clasificador. Esta separación es metodológicamente importante: calcular características no equivale a demostrar capacidad de clasificación.
+
+\section{Interpretación de patrones relevantes para rehabilitación}
+
+El dashboard puede ayudar a describir patrones como:
+\begin{itemize}
+    \item aumento o disminución de amplitud EMG;
+    \item activaciones más largas o más frecuentes;
+    \item diferencias entre músculos;
+    \item cambios de MDF a lo largo de la sesión;
+    \item cambios de inicio y fin de activación entre repeticiones;
+    \item regiones de baja calidad o posible contaminación;
+    \item sensibilidad de las conclusiones a la elección de ventanas.
+\end{itemize}
+
+Un patrón compuesto de aumento de RMS y descenso de MDF durante una contracción sostenida podría ser compatible con manifestaciones mioeléctricas de fatiga. En la tarea actual, que es dinámica, esa inferencia debe hacerse con mayor cautela porque el movimiento y el cambio de fase modifican la señal \cite{hug2024,zwarts1999}. Por tanto, el sistema debe usarse para \textbf{generar evidencia cuantitativa para revisión}, no para etiquetar automáticamente un paciente como lesionado o fatigado.
+
+\section{Reproducibilidad y salidas}
+
+Los datos originales permanecen en \texttt{data/raw/}. El script \texttt{scripts/reproduce.py} ejecuta:
+\begin{enumerate}
+    \item \texttt{process\_and\_save\_signals()}, que produce CSV procesados en \texttt{data/processed/};
+    \item \texttt{process\_and\_export\_summary()}, que consolida metadatos y calidad en un JSON.
+\end{enumerate}
+
+El proyecto utiliza Python 3.12, \texttt{uv}, NumPy, Pandas, SciPy, Plotly y Streamlit. Las pruebas unitarias cubren carga, contrato de datos, validación, filtros, métricas y visualización. La ejecución completa de las pruebas depende de instalar las dependencias declaradas en \texttt{pyproject.toml}, incluido \texttt{basictdf}.
+
+\section{Limitaciones}
+
+\begin{enumerate}
+    \item La unidad física del TDF debe confirmarse con el equipo; se adopta V como hipótesis documentada.
+    \item No existe una referencia MVC real incluida con estos registros; por tanto, \%MVC no debe interpretarse cuando no se suministre una referencia compatible.
+    \item RMS depende de adquisición, electrodos, geometría y tarea; no es fuerza directa.
+    \item MDF es sensible a estacionariedad, fuerza, temperatura, movimiento y cambios en la población de unidades motoras.
+    \item Las flexiones son dinámicas, por lo que la interpretación de fatiga basada únicamente en MDF es limitada.
+    \item Un notch puede eliminar contenido fisiológico alrededor de 60 Hz; por eso se deja desactivado por defecto.
+    \item El umbral de activación basado en el primer segundo falla conceptualmente si ese intervalo no representa una línea base adecuada.
+    \item iEMG depende de la duración del intervalo.
+    \item WL puede aumentar por ruido de alta frecuencia.
+    \item Los parámetros 20 Hz, 450 Hz, 5 Hz, 200 ms y 2 s son elecciones documentadas, pero no son constantes universales.
+    \item \texttt{sosfiltfilt} es offline y no representa un procesamiento causal en tiempo real.
+\end{enumerate}
+
+\section{Conclusiones}
+
+La nueva implementación transforma registros BTS TDF de sEMG en un flujo reproducible de carga, validación, preprocesamiento, segmentación, cuantificación y visualización. El principal aporte metodológico es que los parámetros no quedan ocultos: el dashboard los expone y el informe distingue si su origen es la adquisición, la literatura, la evidencia interna del dataset o una heurística de ingeniería.
+La selección de 20-450 Hz está alineada con prácticas habituales de sEMG y con la frecuencia de muestreo de 1000 Hz. El filtrado a 5 Hz de la envolvente responde a la escala temporal de la activación muscular y a la evidencia interna de las flexiones. La ventana RMS de 200 ms y la ventana MDF de 2 s son decisiones empíricas respaldadas por análisis de sensibilidad del propio proyecto: ofrecen un compromiso entre estabilidad y resolución temporal/frecuencial. El notch de 60 Hz se mantiene opcional porque la interferencia de red debe demostrarse y porque una muesca puede eliminar información útil.
+En consecuencia, el dashboard debe entenderse como una \textbf{herramienta cuantitativa y trazable de apoyo al análisis de movimiento y actividad muscular}, no como un sistema automático de diagnóstico.
+
+\appendix
+\section{Resumen de fórmulas}
+
+\begin{align}
+RMS &= \sqrt{\frac{1}{N}\sum_{n=1}^{N}x_n^2},\\
+iEMG &= \frac{\sum_n |x_n|}{f_s},\\
+WL &= \sum_{n=1}^{N-1}|x_{n+1}-x_n|,\\
+\%MVC &= 100\frac{RMS}{RMS_{MVC}},\\
+T_{act} &= \operatorname{mediana}(B)+3(1.4826)MAD(B).
+\end{align}
+
+\end{document}

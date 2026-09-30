@@ -1,0 +1,230 @@
+\documentclass[10pt, aspectratio=169]{beamer}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish,es-nodecimaldot]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{shapes.misc, positioning, arrows.meta}
+
+% Configuración de colores y estilo visual
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+
+\definecolor{mainblue}{RGB}{40, 60, 110}
+\definecolor{lightbg}{RGB}{240, 243, 250}
+\definecolor{blockbg}{RGB}{230, 235, 245}
+
+\setbeamercolor{structure}{fg=mainblue}
+\setbeamercolor{title}{fg=mainblue, bg=lightbg}
+\setbeamercolor{frametitle}{fg=mainblue, bg=lightbg}
+\setbeamercolor{block title}{fg=white, bg=mainblue}
+\setbeamercolor{block body}{fg=black, bg=blockbg}
+
+% Título y Metadatos
+\title[Laboratorio 3 sEMG reproducible]{Laboratorio 3 - Dashboard interactivo y análisis reproducible de sEMG}
+\author[Integrantes]{Cristian Stiven Capera C., Ana Sofía García G., Jeimmy Andrea Gonzáles G., Karol Mariana Gutiérrez G. y Brayan Andrés Ruiz C.}
+\date{01 de Octubre de 2026}
+
+\begin{document}
+
+% -----------------------------------------------------------------------------
+% Diapositiva 1
+% -----------------------------------------------------------------------------
+\begin{frame}
+\titlepage
+\begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+        \begin{block}{Problema y contexto}
+        \fontsize{8.5pt}{10.5pt}\selectfont
+        La sEMG observa la activación muscular pero depende de factores anatómicos, electrodos y ruido. Interpretar señales crudas puede ocultar decisiones críticas de procesamiento.
+        \end{block}
+        
+        \vspace{0.1cm}
+        \fontsize{8.5pt}{10.5pt}\selectfont
+        \textbf{Pregunta:} ¿Cómo transformar sEMG dinámica en métricas interpretables sin ocultar las decisiones metodológicas?
+    \end{column}
+    
+    \begin{column}{0.48\textwidth}
+        \fontsize{8.5pt}{10.5pt}\selectfont
+        \textbf{Usuario:} profesional de rehabilitación física que necesita explorar patrones cuantitativos de activación muscular.
+        
+        \vspace{0.2cm}
+        \textbf{Límite clínico:} El dashboard \textbf{no diagnostica} fatiga, lesión ni sobreesfuerzo. Las métricas son indicadores exploratorios.
+    \end{column}
+\end{columns}
+\end{frame}
+
+% -----------------------------------------------------------------------------
+% Diapositiva 2
+% -----------------------------------------------------------------------------
+\begin{frame}{BTS TDF, arquitectura y configuración}
+\begin{columns}[c]
+    \begin{column}{0.35\textwidth}
+        \centering
+        \begin{tikzpicture}[
+            node distance=0.3cm,
+            block/.style={draw=mainblue!80, fill=lightbg, rectangle, rounded corners=3pt, inner sep=3pt, text width=3.2cm, align=center, font=\fontsize{7pt}{8pt}\selectfont},
+            arrow/.style={-Stealth, thick, mainblue}
+        ]
+            \node[block] (step1) {Archivos TDF\\ \texttt{data/raw/}};
+            \node[block, below=of step1] (step2) {\texttt{io.py} + Contrato};
+            \node[block, below=of step2] (step3) {\texttt{data\_validation.py}\\Calidad y muestreo};
+            \node[block, below=of step3] (step4) {\texttt{preprocessing\_metrics.py}\\DC + banda + envolvente};
+            \node[block, below=of step4] (step5) {\texttt{metrics.py}\\RMS + MDF + activaciones};
+            \node[block, below=of step5] (step6) {\texttt{app.py} (Streamlit)\\Dashboard y visuales};
+            
+            \draw[arrow] (step1) -- (step2);
+            \draw[arrow] (step2) -- (step3);
+            \draw[arrow] (step3) -- (step4);
+            \draw[arrow] (step4) -- (step5);
+            \draw[arrow] (step5) -- (step6);
+        \end{tikzpicture}
+    \end{column}
+    
+    \begin{column}{0.62\textwidth}
+        \fontsize{8.5pt}{10.5pt}\selectfont
+        \textbf{Registros utilizados}
+        \begin{itemize}
+            \item Tres registros BTS TDF de flexiones de brazos (61--65 s).
+            \item 8 canales sEMG (bíceps, deltoides, pectoral y tríceps bilateral).
+            \item $f_s = 1000$ Hz leída directamente del bloque EMG ($f_N = 500$ Hz).
+        \end{itemize}
+        
+        \vspace{0.1cm}
+        \textbf{Configuración central}
+        \vspace{0.05cm}
+        
+        \centering
+        \fontsize{7.5pt}{9.5pt}\selectfont
+        \begin{tabular}{ll}
+            \toprule
+            \textbf{Parámetro} & \textbf{Valor} \\
+            \midrule
+            Filtro pasa-banda & 20--450 Hz, orden 4 \\
+            Envolvente pasa-bajas & 5 Hz, orden 4 \\
+            Ventana RMS móvil & 200 ms \\
+            Ventana MDF (Welch) & 2 s (solapamiento 50\%) \\
+            Línea base activación & 1 s ($k=3$, MAD) \\
+            Duración mínima activ. & 0.10 s \\
+            \bottomrule
+        \end{tabular}
+    \end{column}
+\end{columns}
+\end{frame}
+
+% -----------------------------------------------------------------------------
+% Diapositiva 3
+% -----------------------------------------------------------------------------
+\begin{frame}{Preprocesamiento, métricas y segmentación}
+\fontsize{8.5pt}{10.5pt}\selectfont
+\begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+        \textbf{Pipeline de señal}
+        \begin{itemize}
+            \item \textbf{DC:} Centrado restando la media.
+            \item \textbf{Filtro:} Butterworth de fase cero (\texttt{sosfiltfilt}) 20--450 Hz.
+            \item \textbf{Rectificación y envolvente:} Valor absoluto seguido de LPF a 5 Hz.
+            \item \textbf{Notch 60 Hz:} Configurable pero desactivado por defecto para evitar distorsión espectral innecesaria.
+        \end{itemize}
+        
+        \vspace{0.1cm}
+        \centering
+        $RMS = \sqrt{\frac{1}{N}\sum x_n^2}, \quad iEMG = \frac{\sum |x_n|}{f_s}$
+    \end{column}
+    
+    \begin{column}{0.48\textwidth}
+        \textbf{Detección de activaciones}
+        \begin{itemize}
+            \item Umbral robusto basado en el primer segundo:
+            $T = \text{med} + 3(1.4826)\text{MAD}$.
+            \item Duración mínima de 100 ms para eliminar fluctuaciones fugaces.
+            \item Brecha de fusión de 100 ms para evitar fragmentación.
+        \end{itemize}
+        
+        \vspace{0.1cm}
+        \textbf{Vector de características}
+        \begin{itemize}
+            \item RMS, \%MVC, MDF, iEMG, WL, número de activaciones y duración media.
+        \end{itemize}
+    \end{column}
+\end{columns}
+\end{frame}
+
+% -----------------------------------------------------------------------------
+% Diapositiva 4
+% -----------------------------------------------------------------------------
+\begin{frame}{Auditoría de parámetros manuales}
+\fontsize{8pt}{10pt}\selectfont
+Justificación de los parámetros fijados en código (evita presentarlos como constantes fisiológicas universales).
+
+\vspace{0.2cm}
+\centering
+\begin{tabular}{llll}
+    \toprule
+    \textbf{Parámetro} & \textbf{Valor} & \textbf{Tipo} & \textbf{Justificación principal} \\
+    \midrule
+    Frecuencia ($f_s$) & 1000 Hz & Adquisición & Leída del TDF; Nyquist a 500 Hz. \\
+    Pasa-banda & 20--450 Hz & Literatura & Reduce movimiento; 450 Hz deja margen vs Nyquist. \\
+    Envolvente LPF & 5 Hz & Fisiología & Sigue la escala temporal de flexiones dinámicas. \\
+    RMS móvil & 200 ms & Empírico & Equilibra estabilidad y resolución temporal. \\
+    Mediana (MDF) & 2 s & Espectral & $\Delta f \approx 0.5$ Hz; menor variabilidad que 1 s. \\
+    \bottomrule
+\end{tabular}
+
+\vspace{0.4cm}
+\begin{block}{Nota metodológica}
+El análisis de sensibilidad interno (ventanas RMS de 100/200/400 ms y MDF de 1/2/4 s) respalda estas elecciones como compromisos de ingeniería adecuados para este dataset.
+\end{block}
+\end{frame}
+
+% -----------------------------------------------------------------------------
+% Diapositiva 5
+% -----------------------------------------------------------------------------
+\begin{frame}[fragile]{Dashboard, reproducibilidad y límites}
+\fontsize{8.5pt}{10.5pt}\selectfont
+\begin{columns}[t]
+    \begin{column}{0.32\textwidth}
+        \textbf{Dashboard Streamlit}
+        \begin{enumerate}
+            \item Carga de TDF o sintético.
+            \item Control de filtros y envolvente.
+            \item Tendencias RMS y MDF.
+            \item Espectro PSD de Welch.
+            \item Calidad y activaciones.
+        \end{enumerate}
+    \end{column}
+    
+    \begin{column}{0.35\textwidth}
+        \textbf{Reproducción}
+        \begin{itemize}
+            \item Datos originales en \texttt{data/raw/}.
+            \item \texttt{scripts/reproduce.py} exporta CSV derivados y JSON.
+            \item Pruebas unitarias en \texttt{pytest}.
+        \end{itemize}
+        
+        \vspace{0.1cm}
+        \textbf{Comandos}
+        \begin{tiny}
+\begin{verbatim}
+uv sync --locked
+uv run ruff check
+uv run pytest -v
+uv run python scripts/reproduce.py
+uv run streamlit run app.py
+\end{verbatim}
+        \end{tiny}
+    \end{column}
+    
+    \begin{column}{0.31\textwidth}
+        \textbf{Límites}
+        \begin{itemize}
+            \item Unidad física adoptada como V (por confirmar).
+            \item Sin MVC real integrada por defecto.
+            \item Filtro offline (\texttt{sosfiltfilt}).
+            \item Herramienta de apoyo cuantitativo, no diagnóstico clínico.
+        \end{itemize}
+    \end{column}
+\end{columns}
+\end{frame}
+
+\end{document}
