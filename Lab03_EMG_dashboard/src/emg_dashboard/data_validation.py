@@ -30,7 +30,15 @@ def channel_quality(x: np.ndarray) -> dict:
     a = np.asarray(x, dtype=float)
     finite = a[np.isfinite(a)]
     if len(finite) == 0:
-        return {"valid_fraction": 0.0, "nan_fraction": 1.0, "flat": True, "saturation_fraction": 0.0}
+        return {
+        "valid_fraction": 0.0,
+        "nan_fraction": 1.0,
+        "flat": True,
+        "saturation_fraction": 0.0,
+        "min": float("nan"),
+        "max": float("nan"),
+        "mean": float("nan"),
+        "std": float("nan"), }
     # Saturación/recorte: fracción de muestras que alcanzan el máximo absoluto
     # observado. Un valor > ~0.1 % sugiere señal recortada (clipping).
     peak = float(np.max(np.abs(finite)))
