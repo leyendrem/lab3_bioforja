@@ -1,11 +1,8 @@
-from __future__ import annotations
-
-import sys
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 # Permite ejecutar `streamlit run app.py` sin instalar el paquete.
-# Si se instala con `uv sync` o `pip install -e .`, esto no hace nada.
 ROOT_DIR = Path(__file__).resolve().parent
 SRC_DIR = ROOT_DIR / "src"
 if SRC_DIR.exists() and str(SRC_DIR) not in sys.path:
@@ -16,15 +13,16 @@ import pandas as pd
 import streamlit as st
 from scipy.signal import welch
 
-# Se importa como paquete: un `import io` suelto cargaría el módulo `io`
-# de la librería estándar, no emg_dashboard/io.py.
+# Importaciones del paquete emg_dashboard
+from emg_dashboard import data_compilation as emg_comp
+from emg_dashboard import data_filtration as emg_filt
 from emg_dashboard import data_validation as emg_val
 from emg_dashboard import io as emg_io
 from emg_dashboard import metrics as emg_metrics
 from emg_dashboard import preprocessing_metrics as emg_prep
 from emg_dashboard import visualization as emg_vis
 
-# Asignación directa de funciones para conservar el resto de app.py intacto
+# Asignación directa de funciones
 load_uploaded_file = emg_io.load_uploaded_file
 validate_contract = emg_io.validate_contract
 
@@ -48,6 +46,19 @@ signal_figure = emg_vis.signal_figure
 spectrum_figure = emg_vis.spectrum_figure
 trend_figure = emg_vis.trend_figure
 
+process_and_save_signals = emg_filt.process_and_save_signals
+process_and_export_summary = emg_comp.process_and_export_summary
+
+# Directorio de datos crudos
+RAW_DATA_DIR = Path("data/raw")
+
+# Parámetros de preprocesamiento fijos
+FIXED_LOW_HZ = 20.0
+FIXED_HIGH_HZ = 450.0
+FIXED_ENVELOPE_HZ = 5.0
+FIXED_USE_NOTCH = False
+FIXED_NOTCH_HZ = 60.0
+
 st.set_page_config(page_title="Monitoreo EMG · Rehabilitación", layout="wide")
 st.title("Dashboard reproducible de EMG · monitoreo de actividad muscular")
 st.caption("Herramienta académica para explorar patrones de activación durante ejercicio.")
@@ -62,22 +73,23 @@ Las métricas son indicadores de monitoreo y no sustituyen una valoración clín
 """)
 
 with st.sidebar:
-    st.header("1 · Datos")
-    uploaded = st.file_uploader("Cargar registro EMG (.tdf)", type=["tdf"])
-    if uploaded is None:
-        demo = st.checkbox("Usar registro demostrativo", value=True)
-    else:
-        demo = False
-        st.caption(f"Usando el archivo cargado: {uploaded.name}")
+    st.header("1 · Muestras TDF (data/raw)")
+    raw_files = sorted(list(RAW_DATA_DIR.glob("*.tdf")))
+    
+    demo = st.checkbox("Usar registro demostrativo", value=not raw_files)
+    selected_raw_path = None
 
-    st.header("2 · Procesamiento")
-    low_hz = st.number_input("Pasa-altas (Hz)", min_value=1.0, value=20.0, step=1.0)
-    high_hz = st.number_input("Pasa-bajas (Hz)", min_value=5.0, value=450.0, step=5.0)
-    envelope_hz = st.number_input("Envolvente pasa-bajas (Hz)", min_value=0.5, value=5.0, step=0.5)
-    use_notch = st.checkbox("Aplicar notch", value=False)
-    notch_hz = st.number_input("Frecuencia notch (Hz)", min_value=40.0, max_value=70.0, value=60.0, step=1.0)
+    if not demo:
+        if not raw_files:
+            st.warning(f"No se encontraron archivos .tdf en `{RAW_DATA_DIR}`.")
+        else:
+            selected_raw_path = st.selectbox(
+                "Selecciona una muestra TDF",
+                raw_files,
+                format_func=lambda x: x.name,
+            )
 
-    st.header("3 · Ventanas")
+    st.header("2 · Ventanas y Análisis")
     rms_window_ms = st.slider("Ventana RMS (ms)", 50, 500, 200, 10)
     spectral_window_s = st.slider("Ventana espectral (s)", 0.5, 4.0, 2.0, 0.5)
     activation_threshold_multiplier = st.slider("Umbral activación × MAD", 1.0, 8.0, 3.0, 0.5)
@@ -85,14 +97,14 @@ with st.sidebar:
 
     spectrum_log = st.checkbox("Espectro en escala logarítmica", value=False)
 
-    st.header("4 · Referencia MVC")
+    st.header("3 · Referencia MVC")
     mvc_reference = st.number_input(
-        "RMS MVC de referencia (misma unidad que la señal)",
+        "RMS MVC de referencia",
         min_value=0.0,
         value=0.0,
         step=1e-5,
         format="%.6f",
-        help="Deje 0 si no tiene referencia. Los registros TDF suelen estar en voltios (RMS del orden de 1e-4).",
+        help="Deje 0 si no tiene referencia.",
     )
     mvc_reference = None if mvc_reference <= 0 else float(mvc_reference)
 
@@ -108,43 +120,36 @@ def demo_data() -> tuple[pd.DataFrame, dict]:
         envelope += 0.25 * ((t >= start) & (t < start + 1.5))
     carrier = rng.normal(0, 0.035, len(t))
     drift = 0.01 * np.sin(2 * np.pi * 0.4 * t)
-    # Demonstration only: no clinical meaning.
     signal = envelope * np.sin(2 * np.pi * 90 * t) + carrier + drift
     df = pd.DataFrame({"time_s": t, "emg": signal, "channel": "Demo_Muscle", "session": "DEMO", "event": ""})
     return df, {"source": "demo", "fs": fs, "format": "DEMO"}
 
 
-@st.cache_data(show_spinner="Leyendo archivo TDF...")
-def cargar_archivo_subido(nombre: str, contenido: bytes) -> tuple[pd.DataFrame, dict]:
-    """Carga en caché: solo se relee el TDF si cambia el archivo."""
-    archivo = SimpleNamespace(name=nombre, getbuffer=lambda: contenido)
+@st.cache_data(show_spinner="Leyendo archivo TDF local...")
+def cargar_archivo_tdf_local(file_path: Path) -> tuple[pd.DataFrame, dict]:
+    archivo = SimpleNamespace(name=file_path.name, getbuffer=file_path.read_bytes)
     return load_uploaded_file(archivo)
 
 
 @st.cache_data(show_spinner="Filtrando canal...")
 def procesar_canal(x, fs, low_hz, high_hz, envelope_hz, use_notch, notch_hz):
-    """Preprocesamiento en caché: solo se recalcula si cambian canal o filtros."""
     return preprocess_emg(x, fs, low_hz, high_hz, envelope_hz, use_notch, notch_hz)
 
-
-if not demo and uploaded is None:
-    st.info("Carga un archivo .tdf para comenzar.")
-    st.stop()
 
 try:
     if demo:
         df, meta = demo_data()
+    elif selected_raw_path is not None:
+        df, meta = cargar_archivo_tdf_local(selected_raw_path)
     else:
-        df, meta = cargar_archivo_subido(uploaded.name, uploaded.getvalue())
+        st.info("Por favor, selecciona una muestra TDF o activa el modo demostrativo.")
+        st.stop()
 except Exception as exc:
     st.error(f"No fue posible cargar el registro: {exc}")
     st.stop()
 
 if demo:
-    st.warning(
-        "Estás viendo datos artificiales de demostración, "
-        "no un registro real."
-    )
+    st.warning("Estás viendo datos artificiales de demostración, no un registro real.")
 
 errores = validate_contract(df)
 if errores:
@@ -154,15 +159,7 @@ if errores:
 
 fs = float(meta.get("fs"))
 nyquist = fs / 2
-if not 0 < low_hz < high_hz < nyquist:
-    st.error(
-        f"Filtros no válidos para fs = {fs:g} Hz: debe cumplirse "
-        f"0 < pasa-altas < pasa-bajas < {nyquist:g} Hz."
-    )
-    st.stop()
-if envelope_hz >= nyquist:
-    st.error(f"La envolvente debe estar por debajo de {nyquist:g} Hz.")
-    st.stop()
+
 sessions = sorted(df["session"].unique())
 selected_session = st.sidebar.selectbox("Sesión", sessions)
 sub = df[df["session"] == selected_session]
@@ -184,39 +181,24 @@ start, end = st.sidebar.slider(
     min_value=min_time,
     max_value=max_time,
     value=(min_time, min(min_time + 10.0, max_time)),
-    step=min(0.01, duracion / 100)
+    step=min(0.01, duracion / 100),
 )
 segment = ch[(ch["time_s"] >= start) & (ch["time_s"] <= end)].copy()
 
 if len(segment) < max(100, int(fs * 0.25)):
-    st.warning("El intervalo seleccionado es demasiado corto para algunas métricas. Amplíelo.")
+    st.warning("El intervalo seleccionado es demasiado corto.")
     st.stop()
 
 time = segment["time_s"].to_numpy(dtype=float)
 inicio_fragmento = float(time[0])
-
-# Obtener todas las muestras del canal seleccionado.
 x_canal = ch["emg"].to_numpy(dtype=float)
 
 try:
-    # Procesar el canal completo.
     etapas_completas = procesar_canal(
-        x_canal, fs, low_hz, high_hz,
-        envelope_hz, use_notch, notch_hz
+        x_canal, fs, FIXED_LOW_HZ, FIXED_HIGH_HZ, FIXED_ENVELOPE_HZ, FIXED_USE_NOTCH, FIXED_NOTCH_HZ
     )
-
-    # Identificar las muestras del intervalo seleccionado.
-    mascara = (
-        (ch["time_s"] >= start) &
-        (ch["time_s"] <= end)
-    ).to_numpy()
-
-    # Recortar cada etapa usando la misma selección.
-    stages = {
-        nombre: valores[mascara]
-        for nombre, valores in etapas_completas.items()
-    }
-
+    mascara = ((ch["time_s"] >= start) & (ch["time_s"] <= end)).to_numpy()
+    stages = {nombre: valores[mascara] for nombre, valores in etapas_completas.items()}
 except Exception as exc:
     st.error(f"No fue posible procesar el canal: {exc}")
     st.stop()
@@ -229,9 +211,8 @@ try:
         etapas_completas["envelope"],
         fs,
         baseline_seconds=1.0,
-        threshold_multiplier=activation_threshold_multiplier
+        threshold_multiplier=activation_threshold_multiplier,
     )
-
     activations = activation_segments(
         envelope,
         fs,
@@ -239,12 +220,10 @@ try:
         min_duration_s=min_activation_s,
         t0=inicio_fragmento,
     )
-
 except Exception as exc:
     st.error(f"No se pudieron calcular las activaciones: {exc}")
     st.stop()
 
-# Summary
 st.header("Resumen")
 try:
     resumen = segment_summary(
@@ -252,7 +231,7 @@ try:
         envelope,
         fs,
         mvc_ref=mvc_reference,
-        spectral_window_s=spectral_window_s
+        spectral_window_s=spectral_window_s,
     )
 except ValueError as exc:
     st.error(f"No se pudieron calcular las métricas: {exc}")
@@ -264,10 +243,7 @@ mdf_value = resumen["MDF_Hz"]
 wl_value = resumen["WL"]
 
 if resumen["MDF_note"]:
-    st.info(
-        f"Frecuencia mediana no disponible: "
-        f"{resumen['MDF_note']}"
-    )
+    st.info(f"Frecuencia mediana no disponible: {resumen['MDF_note']}")
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("RMS", f"{rms_value:.4g}" if np.isfinite(rms_value) else "—")
@@ -276,10 +252,7 @@ c3.metric("MDF", f"{mdf_value:.1f} Hz" if np.isfinite(mdf_value) else "—")
 c4.metric("iEMG", f"{iemg_value:.4g}" if np.isfinite(iemg_value) else "—")
 c5.metric("Activaciones", str(len(activations)))
 
-st.caption(
-    "WL (longitud de la forma de onda) del intervalo seleccionado: "
-    + (f"{wl_value:.4g}" if np.isfinite(wl_value) else "—")
-)
+st.caption("WL (longitud de la forma de onda): " + (f"{wl_value:.4g}" if np.isfinite(wl_value) else "—"))
 
 st.header("Señal y activación")
 st.plotly_chart(
@@ -291,88 +264,61 @@ st.plotly_chart(
         activation_segments=activations,
         raw_label="Cruda (sin DC)",
     ),
-    width="stretch",
+    use_container_width=True,
 )
 
 st.header("Tendencias")
 col1, col2 = st.columns(2)
 
 try:
-    rms_series = moving_rms(
-        filtered, fs, rms_window_ms
-    )
-    col1.plotly_chart(
-        trend_figure(
-            time, rms_series, "RMS móvil", "RMS"
-        ),
-        width="stretch"
-    )
+    rms_series = moving_rms(filtered, fs, rms_window_ms)
+    col1.plotly_chart(trend_figure(time, rms_series, "RMS móvil", "RMS"), use_container_width=True)
 except ValueError as exc:
-    col1.warning(
-        f"No se pudo calcular el RMS móvil: {exc}"
-    )
+    col1.warning(f"No se pudo calcular el RMS móvil: {exc}")
 
 try:
-    t_mdf, y_mdf = median_frequency_trend(
-        filtered, fs, spectral_window_s, t0=inicio_fragmento
-    )
-    col2.plotly_chart(
-        trend_figure(
-            t_mdf,
-            y_mdf,
-            "Frecuencia mediana",
-            "MDF (Hz)"
-        ),
-        width="stretch"
-    )
+    t_mdf, y_mdf = median_frequency_trend(filtered, fs, spectral_window_s, t0=inicio_fragmento)
+    col2.plotly_chart(trend_figure(t_mdf, y_mdf, "Frecuencia mediana", "MDF (Hz)"), use_container_width=True)
 except Exception as exc:
     col2.warning(f"No se pudo calcular la tendencia espectral: {exc}")
 
 st.header("Espectro exploratorio")
-f, pxx = welch(filtered, fs=fs, nperseg=min(len(filtered), max(16, int(spectral_window_s * fs))))
-st.plotly_chart(
-    spectrum_figure(f, pxx, y_title="PSD (unidad²/Hz)", log_y=spectrum_log),
-    width="stretch",
-)
+f, pxx = welch(filtered, fs=fs, nperseg=min(len(filtered), max(16, round(spectral_window_s * fs))))
+st.plotly_chart(spectrum_figure(f, pxx, y_title="PSD (unidad²/Hz)", log_y=spectrum_log), use_container_width=True)
 
 st.header("Sensibilidad a ventanas")
 rms_sens, mdf_sens = window_sensitivity(filtered, fs)
 sens_rms = pd.DataFrame.from_dict(rms_sens, orient="index").reset_index().rename(columns={"index": "ventana_RMS_ms"})
 sens_mdf = pd.DataFrame.from_dict(mdf_sens, orient="index").reset_index().rename(columns={"index": "ventana_MDF_s"})
 cs1, cs2 = st.columns(2)
-cs1.dataframe(sens_rms, width="stretch", hide_index=True)
-cs2.dataframe(sens_mdf, width="stretch", hide_index=True)
-st.caption("La ventana final debe elegirse por el fenómeno observado, equilibrando resolución temporal, resolución frecuencial y estacionariedad local.")
+cs1.dataframe(sens_rms, use_container_width=True, hide_index=True)
+cs2.dataframe(sens_mdf, use_container_width=True, hide_index=True)
 
 st.header("Activaciones detectadas")
 if activations:
-    st.dataframe(pd.DataFrame(activations), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(activations), use_container_width=True, hide_index=True)
 else:
     st.write("No se detectaron activaciones con el umbral actual.")
 
 with st.expander("Parámetros de análisis y justificación", expanded=False):
     params = pd.DataFrame([
-        ["fs", fs, "Frecuencia del bloque EMG; condiciona el rango filtrable y las ventanas."],
-        ["Pasa-altas", low_hz, "Reduce componentes lentas y artefactos de movimiento; debe revisarse con el espectro."],
-        ["Pasa-bajas", high_hz, "Conserva el contenido mioeléctrico útil dentro del ancho de banda de adquisición."],
-        ["Notch", f"{use_notch} · {notch_hz} Hz", "Solo debe activarse si el espectro evidencia interferencia estrecha de red."],
-        ["Envolvente", envelope_hz, "Suaviza la señal rectificada para seguir la dinámica de activación."],
-        ["Ventana RMS", rms_window_ms, "Compromiso entre seguimiento temporal y estabilidad de la estimación."],
-        ["Ventana espectral", spectral_window_s, "Necesita suficientes muestras y una estacionariedad local razonable."],
-        ["Umbral activación", f"mediana + {activation_threshold_multiplier}×1.4826×MAD", "Heurística transparente de detección; no es umbral clínico."],
-        ["Duración mínima", min_activation_s, "Evita contar fluctuaciones muy breves como activaciones."],
+        ["fs", fs, "Frecuencia del bloque EMG."],
+        ["Pasa-altas", FIXED_LOW_HZ, "Filtro fijo para reducir componentes lentas y artefactos de movimiento."],
+        ["Pasa-bajas", FIXED_HIGH_HZ, "Filtro fijo para conservar el contenido útil."],
+        ["Notch", f"{FIXED_USE_NOTCH} · {FIXED_NOTCH_HZ} Hz", "Desactivado por defecto."],
+        ["Envolvente", FIXED_ENVELOPE_HZ, "Filtro de envolvente fijo."],
+        ["Ventana RMS", rms_window_ms, "Compromiso temporal/estabilidad."],
+        ["Ventana espectral", spectral_window_s, "Requiere estacionariedad local."],
+        ["Umbral activación", f"mediana + {activation_threshold_multiplier}×MAD", "Heurística de detección."],
+        ["Duración mínima", min_activation_s, "Evita falsos positivos breves."],
     ], columns=["Parámetro", "Valor", "Razón fisiológica/metodológica"])
-    # Columna con números y textos mezclados: se pasa a texto para Arrow.
     params["Valor"] = params["Valor"].astype(str)
-    st.dataframe(params, width="stretch", hide_index=True)
+    st.dataframe(params, use_container_width=True, hide_index=True)
 
 with st.expander("Calidad y trazabilidad"):
     st.json(sampling_report(ch, fs))
     st.json(channel_quality(ch["emg"].to_numpy()))
     st.write("**Origen:**", meta.get("source"), "· **Formato:**", meta.get("format"))
-    if meta.get("events"):
-        st.write("**Eventos presentes en el TDF:**")
-        st.json(meta["events"])
 
 st.header("Vector de características para clasificación")
 feature_row = {
@@ -388,17 +334,27 @@ feature_row = {
     "n_activations": len(activations),
     "mean_activation_duration_s": float(np.mean([a["duration_s"] for a in activations])) if activations else np.nan,
 }
-st.dataframe(pd.DataFrame([feature_row]), width="stretch", hide_index=True)
-st.caption("Estas variables pueden alimentar una clasificación posterior de actividades cuando existan etiquetas de ejercicio y suficientes repeticiones. El dashboard no entrena un clasificador con una sola sesión.")
+st.dataframe(pd.DataFrame([feature_row]), use_container_width=True, hide_index=True)
 
 st.header("Interpretación fisiológica")
 st.markdown("""
-- **RMS:** resume la magnitud de la actividad eléctrica en una ventana. Un aumento describe mayor amplitud EMG, pero no equivale por sí solo a mayor fuerza ni a lesión.
-- **%MVC:** expresa la amplitud respecto a una referencia MVC. Solo se muestra cuando se proporciona una referencia adquirida con el mismo protocolo/unidades.
-- **MDF:** resume la distribución espectral. Un desplazamiento hacia frecuencias menores durante una contracción sostenida y controlada puede ser compatible con manifestaciones mioeléctricas de fatiga; en tareas dinámicas debe interpretarse con cautela.
-- **Inicio, fin y duración:** describen cuándo el músculo cruza el umbral de activación y cuánto permanece activo. Sirven para explorar coordinación y posibles activaciones prolongadas, pero requieren contexto biomecánico.
-- **iEMG:** cuantifica actividad acumulada y depende de la duración del intervalo; por eso no debe compararse entre segmentos de duraciones diferentes sin control.
-- **WL:** cuantifica el recorrido absoluto de la señal y puede aumentar con cambios rápidos o ruido; debe interpretarse junto con la calidad de la señal.
+- **RMS:** Magnitud de la actividad eléctrica.
+- **%MVC:** Amplitud respecto a referencia.
+- **MDF:** Distribución espectral (posible fatiga).
+- **Inicio/Fin/Duración:** Dinámica temporal de activación.
+- **iEMG:** Actividad acumulada.
+- **WL:** Recorrido absoluto de la forma de onda.
 """)
 
-st.warning("Este dashboard no diagnostica fatiga, lesión ni riesgo clínico. Su propósito es hacer visibles patrones cuantitativos y las decisiones de procesamiento para revisión por un especialista.")
+st.warning("Este dashboard no diagnostica fatiga, lesión ni riesgo clínico.")
+
+if __name__ == "__main__":
+    print("Ejecutando filtrado y guardado de señales...")
+    process_and_save_signals()
+    
+    print("\n--------------------------------------------------\n")
+    
+    print("Validando contratos y generando resumen consolidado...")
+    process_and_export_summary()
+    
+    print("¡Pipeline ejecutado y exportado con éxito!")
