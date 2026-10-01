@@ -49,13 +49,37 @@ def test_preprocess_emg_pipeline():
     # Creamos una señal sintética de 1 segundo (1000 muestras)
     t = np.linspace(0, 1, int(fs))
     x = np.sin(2 * np.pi * 50 * t) + 5.0  # Senoide a 50 Hz con offset DC de 5.0
-    
+
     stages = preprocess_emg(x, fs=fs, use_notch=True)
-    
+
     # Comprobar que el diccionario contenga todas las etapas clave
     expected_keys = {"raw", "dc_removed", "filtered", "rectified", "envelope"}
     assert expected_keys.issubset(stages.keys())
-    
+
     # Comprobar que mantenga la misma longitud de muestras
     for key in expected_keys:
         assert len(stages[key]) == len(x)
+
+
+def test_filters_reject_invalid_fs_and_short_signal():
+    with pytest.raises(ValueError, match="fs"):
+        bandpass_emg(np.ones(100), fs=0.0, low_hz=10.0, high_hz=100.0)
+    with pytest.raises(ValueError, match="demasiado corta"):
+        bandpass_emg(np.ones(10), fs=1000.0, low_hz=10.0, high_hz=100.0)
+
+
+def test_preprocessing_rejects_nan_instead_of_propagating_silently():
+    x = np.ones(1000)
+    x[20] = np.nan
+    with pytest.raises(ValueError, match="finit"):
+        remove_dc(x)
+
+
+def test_envelope_cutoff_and_notch_band_are_validated():
+    x = np.ones(1000)
+    with pytest.raises(ValueError, match="cutoff"):
+        from emg_dashboard.preprocessing_metrics import lowpass_envelope
+
+        lowpass_envelope(x, 1000.0, 500.0)
+    with pytest.raises(ValueError, match="banda notch"):
+        notch_filter(x, 1000.0, bandwidth_hz=0.0)
