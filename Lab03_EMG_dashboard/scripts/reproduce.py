@@ -1,5 +1,5 @@
-from emg_dashboard.data_filtration import process_and_save_signals
 from emg_dashboard.data_compilation import process_and_export_summary
+from emg_dashboard.data_filtration import process_and_save_signals
 
 if __name__ == "__main__":
 

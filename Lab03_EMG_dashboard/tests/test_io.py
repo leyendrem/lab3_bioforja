@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
-from emg_dashboard.io import validate_contract, build_emg_dataframe, load_file
+
+from emg_dashboard.io import load_file, validate_contract
 
 
 def test_validate_contract_valid():

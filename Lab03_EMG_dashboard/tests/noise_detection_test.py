@@ -1,7 +1,7 @@
 from pathlib import Path
-import numpy as np
-from emg_dashboard.io import load_file
+
 from emg_dashboard.data_validation import detect_powerline_interference
+from emg_dashboard.io import load_file
 
 
 def audit_all_files_for_notch(data_dir: str | Path = "data/raw") -> None:

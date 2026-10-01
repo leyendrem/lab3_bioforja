@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 import pytest
-from emg_dashboard.data_validation import sampling_report, channel_quality
+
+from emg_dashboard.data_validation import channel_quality, sampling_report
 
 
 def test_sampling_report():

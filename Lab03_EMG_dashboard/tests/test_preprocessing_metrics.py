@@ -1,12 +1,14 @@
 import numpy as np
 import pytest
+
 from emg_dashboard.preprocessing_metrics import (
-    remove_dc,
     bandpass_emg,
     notch_filter,
+    preprocess_emg,
     rectify,
-    preprocess_emg
+    remove_dc,
 )
+
 
 def test_remove_dc():
     """Verifica que se elimine correctamente la componente DC centrando la señal en cero."""

@@ -1,5 +1,5 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 # Permite ejecutar `streamlit run app.py` sin instalar el paquete.
@@ -74,7 +74,7 @@ Las métricas son indicadores de monitoreo y no sustituyen una valoración clín
 
 with st.sidebar:
     st.header("1 · Muestras TDF (data/raw)")
-    raw_files = sorted(list(RAW_DATA_DIR.glob("*.tdf")))
+    raw_files = sorted(RAW_DATA_DIR.glob("*.tdf"))
     
     demo = st.checkbox("Usar registro demostrativo", value=not raw_files)
     selected_raw_path = None
