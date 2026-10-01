@@ -12,7 +12,7 @@ def process_and_save_signals() -> None:
     processed_dir = Path("data/processed")
     processed_dir.mkdir(parents=True, exist_ok=True)
     
-    tdf_files = sorted(list(raw_dir.glob("*.tdf")))
+    tdf_files = sorted(raw_dir.glob("*.tdf"))
     if not tdf_files:
         raise FileNotFoundError(f"No se encontraron archivos .tdf en: {raw_dir}")
 
