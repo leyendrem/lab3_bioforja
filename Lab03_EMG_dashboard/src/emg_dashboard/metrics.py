@@ -66,6 +66,8 @@ def moving_rms(x: np.ndarray, fs: float, window_ms: float = 200.0) -> np.ndarray
     if window_ms <= 0:
         raise ValueError("window_ms debe ser positivo.")
     a = np.asarray(x, dtype=float).ravel()
+    if a.size == 0:
+        raise ValueError("La señal está vacía.")
     n = max(1, round(window_ms * fs / 1000.0))
     if n > len(a):
         raise ValueError(
