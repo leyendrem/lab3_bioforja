@@ -7,10 +7,11 @@ def as_float(x) -> np.ndarray:
     return np.asarray(x, dtype=float)
 
 
-def remove_dc(x: np.ndarray) -> np.ndarray:
-    """Elimina la componente de corriente directa (DC), centrando la señal en cero restando su media."""
+def remove_dc(x):
     x = as_float(x)
-    return x - np.nanmean(x)
+    if not np.isfinite(x).all():
+        raise ValueError("La señal contiene valores no finitos (NaN/inf).")
+    return x - np.mean(x)
 
 
 def bandpass_emg(x, fs, low_hz, high_hz, order=4):
