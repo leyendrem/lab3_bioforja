@@ -49,7 +49,7 @@ def test_moving_rms_does_not_hide_nan():
     x = np.ones(1000)
     x[400:700] = np.nan
     y = moving_rms(x, FS, 100)
-    assert np.isnan(y[550])          # sin muestras válidas → NaN, no 0
+    assert np.isnan(y[550])  # sin muestras válidas → NaN, no 0
     assert y[100] == pytest.approx(1.0)
 
 
@@ -66,7 +66,9 @@ def test_nan_is_reported_not_hidden():
 
 
 def test_median_frequency_of_sine():
-    assert median_frequency(_sine(80.0), FS, nperseg=1000) == pytest.approx(80.0, abs=2.0)
+    assert median_frequency(_sine(80.0), FS, nperseg=1000) == pytest.approx(
+        80.0, abs=2.0
+    )
 
 
 def test_median_frequency_segment_shorter_than_window():
@@ -86,9 +88,11 @@ def test_median_frequency_flat_signal_is_nan():
 
 
 def test_mdf_trend_shape_and_time_axis():
-    t, y = median_frequency_trend(_sine(dur=10.0), FS, window_s=2.0, overlap=0.5, t0=5.0)
-    assert len(t) == len(y) == 9            # (10-2)/1 + 1
-    assert t[0] == pytest.approx(6.0)       # 5 + 2/2
+    t, y = median_frequency_trend(
+        _sine(dur=10.0), FS, window_s=2.0, overlap=0.5, t0=5.0
+    )
+    assert len(t) == len(y) == 9  # (10-2)/1 + 1
+    assert t[0] == pytest.approx(6.0)  # 5 + 2/2
     assert np.allclose(y, 50.0, atol=2.0)
 
 
@@ -120,4 +124,39 @@ def test_window_sensitivity_larger_window_is_more_stable():
     x = rng.normal(size=20000)
     rms_res, mdf_res = window_sensitivity(x, FS, (50, 200, 800), (1.0, 2.0, 4.0))
     assert rms_res[50.0]["cv"] > rms_res[800.0]["cv"]
-    assert mdf_res[1.0]["n"] > mdf_res[4.0]["n"]   # más resolución temporal con ventana corta
+    assert (
+        mdf_res[1.0]["n"] > mdf_res[4.0]["n"]
+    )  # más resolución temporal con ventana corta
+
+
+def test_moving_rms_rejects_empty_or_nonfinite_window():
+    with pytest.raises(ValueError, match="vacía"):
+        moving_rms([], FS, 100)
+    with pytest.raises(ValueError, match="positivo"):
+        moving_rms(np.ones(100), FS, np.nan)
+
+
+def test_activation_parameters_and_summary_lengths_are_validated():
+    with pytest.raises(ValueError, match="baseline"):
+        from emg_dashboard.metrics import activation_threshold
+
+        activation_threshold(np.ones(100), FS, baseline_seconds=0)
+    with pytest.raises(ValueError, match="misma longitud"):
+        segment_summary(np.ones(100), np.ones(99), FS)
+
+
+def test_window_sensitivity_longer_than_signal_returns_coherent_empty_results():
+    rms_res, mdf_res = window_sensitivity(np.ones(100), FS, (200,), (2.0,))
+    assert rms_res[200.0]["n"] == 0
+    assert mdf_res[2.0]["n"] == 0
+
+
+def test_spectral_and_activation_parameters_have_clear_guards():
+    with pytest.raises(ValueError, match="nperseg"):
+        median_frequency(np.ones(100), FS, nperseg=np.nan)
+    with pytest.raises(ValueError, match="window_s"):
+        median_frequency_trend(np.ones(1000), FS, window_s=0)
+    with pytest.raises(ValueError, match="finito"):
+        activation_segments(np.zeros(100), FS, threshold=0.5, t0=np.nan)
+    with pytest.raises(ValueError, match="overlap"):
+        window_sensitivity(np.ones(2000), FS, overlap=1.0)
