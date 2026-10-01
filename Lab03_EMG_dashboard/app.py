@@ -52,12 +52,13 @@ process_and_export_summary = emg_comp.process_and_export_summary
 # Directorio de datos crudos
 RAW_DATA_DIR = Path("data/raw")
 
-# Parámetros de preprocesamiento fijos
+# Parámetros de preprocesamiento y análisis fijos
 FIXED_LOW_HZ = 20.0
 FIXED_HIGH_HZ = 450.0
 FIXED_ENVELOPE_HZ = 5.0
 FIXED_USE_NOTCH = False
 FIXED_NOTCH_HZ = 60.0
+FIXED_ACTIVATION_MULTIPLIER = 2.5  # Subido de 3.0 a 4.0 para ser más estricto con el ruido
 
 st.set_page_config(page_title="Monitoreo EMG · Rehabilitación", layout="wide")
 st.title("Dashboard reproducible de EMG · monitoreo de actividad muscular")
@@ -92,7 +93,6 @@ with st.sidebar:
     st.header("2 · Ventanas y Análisis")
     rms_window_ms = st.slider("Ventana RMS (ms)", 50, 500, 200, 10)
     spectral_window_s = st.slider("Ventana espectral (s)", 0.5, 4.0, 2.0, 0.5)
-    activation_threshold_multiplier = st.slider("Umbral activación × MAD", 1.0, 8.0, 3.0, 0.5)
     min_activation_s = st.slider("Duración mínima activación (s)", 0.05, 0.50, 0.10, 0.05)
     spectrum_log = st.checkbox("Espectro en escala logarítmica", value=False)
 
@@ -221,7 +221,7 @@ try:
         etapas_completas["envelope"],
         fs,
         baseline_seconds=1.0,
-        threshold_multiplier=activation_threshold_multiplier,
+        threshold_multiplier=FIXED_ACTIVATION_MULTIPLIER,
     )
     activations = activation_segments(
         envelope,
