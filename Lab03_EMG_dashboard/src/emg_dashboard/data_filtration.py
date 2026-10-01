@@ -1,5 +1,7 @@
 from pathlib import Path
+
 import pandas as pd
+
 from emg_dashboard.io import load_file
 from emg_dashboard.preprocessing_metrics import preprocess_emg
 

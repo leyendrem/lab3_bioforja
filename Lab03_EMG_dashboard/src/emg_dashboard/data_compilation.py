@@ -1,7 +1,8 @@
-from pathlib import Path
 import json
+from pathlib import Path
+
+from emg_dashboard.data_validation import channel_quality, sampling_report
 from emg_dashboard.io import load_file, validate_contract
-from emg_dashboard.data_validation import sampling_report, channel_quality
 
 
 def export_metadata_to_json(metadata: dict, indent: int = 2) -> str:
@@ -27,7 +28,7 @@ def process_and_export_summary(data_dir: str | Path = "data/raw") -> str:
     JSON consolidado con la metadata de todos los archivos leídos en 'results/'."""
     
     data_dir = Path(data_dir)
-    tdf_files = sorted(list(data_dir.glob("*.tdf")))
+    tdf_files = sorted(data_dir.glob("*.tdf"))
 
     if not tdf_files:
         raise FileNotFoundError(f"No se encontraron archivos .tdf en: {data_dir}")

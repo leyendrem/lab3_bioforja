@@ -3,7 +3,6 @@ from tempfile import NamedTemporaryFile
 
 import numpy as np
 import pandas as pd
-
 from basictdf import Tdf
 
 REQUIRED_COLUMNS = {"time_s", "emg", "channel", "session"}

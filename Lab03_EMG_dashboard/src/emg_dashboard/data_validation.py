@@ -9,7 +9,7 @@ def sampling_report(df: pd.DataFrame, fs: float) -> dict:
     positive = dt[dt > 0]
     return {
         "fs_configured_or_estimated_hz": float(fs),
-        "n_unique_times": int(len(t)),
+        "n_unique_times": len(t),
         "duplicate_time_points": int(np.sum(dt == 0)),
         "median_dt_s": float(np.median(positive)) if len(positive) else float("nan"),
         "cv_dt": float(np.std(positive) / np.mean(positive)) if len(positive) and np.mean(positive) else float("nan"),
