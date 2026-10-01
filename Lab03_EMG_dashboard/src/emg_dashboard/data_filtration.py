@@ -7,9 +7,9 @@ from emg_dashboard.preprocessing_metrics import preprocess_emg
 
 
 def process_and_save_signals() -> None:
-    """Recorre todos los archivos crudos .tdf, aplica el pipeline de preprocesamiento EMG (filtros, rectificación 
-    y envolvente) y guarda los resultados limpios en formato CSV dentro de data/processed/."""
-    
+    raw_dir: str | Path = "data/raw",
+    processed_dir: str | Path = "data/processed",
+) -> None:
     raw_dir = Path("data/raw")
     processed_dir = Path("data/processed")
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -36,11 +36,13 @@ def process_and_save_signals() -> None:
             df_res = pd.DataFrame({
                 "time_s": t,
                 "channel": canal,
+                "session": df_canal["session"].iloc[0] if "session" in df_canal else file_path.stem,
+                "event": df_canal["event"].iloc[0] if "event" in df_canal else "",
                 "raw": stages["raw"],
                 "dc_removed": stages["dc_removed"],
                 "filtered": stages["filtered"],
                 "rectified": stages["rectified"],
-                "envelope": stages["envelope"]
+                "envelope": stages["envelope"],
             })
             processed_channels.append(df_res)
             
