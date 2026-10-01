@@ -63,7 +63,7 @@ def moving_rms(x: np.ndarray, fs: float, window_ms: float = 200.0) -> np.ndarray
     con las muestras realmente disponibles.
     """
     _check_fs(fs)
-    if window_ms <= 0:
+    if not np.isfinite(window_ms) or window_ms <= 0:
         raise ValueError("window_ms debe ser positivo.")
     a = np.asarray(x, dtype=float).ravel()
     if a.size == 0:
@@ -127,10 +127,13 @@ def median_frequency(x: np.ndarray, fs: float, nperseg: int = 1024) -> float:
             "El segmento contiene valores no finitos; la frecuencia mediana "
             "requiere muestras contiguas."
         )
+    if not np.isfinite(nperseg):
+        raise ValueError("nperseg debe ser un entero finito >= 2.")
     nperseg = int(nperseg)
     if nperseg < MIN_SPECTRAL_SAMPLES:
         raise ValueError(
-            f"La ventana espectral es demasiado corta (mínimo {MIN_SPECTRAL_SAMPLES} muestras)."
+            f"La ventana espectral es demasiado corta "
+            f"(mínimo {MIN_SPECTRAL_SAMPLES} muestras)."
         )
     if len(a) < nperseg:
         raise ValueError(
@@ -159,6 +162,8 @@ def median_frequency_trend(
     Las ventanas donde la MDF no puede calcularse quedan como ``NaN``.
     """
     _check_fs(fs)
+    if not np.isfinite(window_s) or window_s <= 0:
+        raise ValueError("window_s debe ser un número positivo.")
     if not 0 <= overlap < 1:
         raise ValueError("overlap debe estar en [0, 1).")
     a = np.asarray(x, dtype=float).ravel()
@@ -198,6 +203,8 @@ def activation_threshold(
     """
     env = np.asarray(envelope, dtype=float)
     _check_fs(fs)
+    if not np.isfinite(baseline_seconds) or baseline_seconds <= 0:
+        raise ValueError("baseline_seconds debe ser un número positivo.")
     if len(env) < 3:
         raise ValueError("Señal insuficiente para detectar activaciones.")
     n0 = min(len(env), max(1, round(baseline_seconds * fs)))
@@ -228,14 +235,17 @@ def activation_segments(
     """
     env = np.asarray(envelope, dtype=float)
     _check_fs(fs)
+    if not np.isfinite(t0):
+        raise ValueError("t0 debe ser un número finito.")
     if len(env) < 3:
         raise ValueError("Señal insuficiente para detectar activaciones.")
     if threshold is None:
-        threshold = activation_threshold(env, fs, baseline_seconds, threshold_multiplier)
+        threshold = activation_threshold(
+            env, fs, baseline_seconds, threshold_multiplier
+        )
     active = np.nan_to_num(env, nan=0.0) > threshold  # NaN = "no activo" (explícito)
     starts = np.flatnonzero(active & ~np.r_[False, active[:-1]])
     ends = np.flatnonzero(active & ~np.r_[active[1:], False])
-
     raw = []
     for s, e in zip(starts, ends):
         dur = (e - s + 1) / fs
@@ -248,7 +258,12 @@ def activation_segments(
         else:
             merged.append([s, e])
     return [
-        {"start_s": s, "end_s": e, "duration_s": e - s, "threshold": float(threshold)}
+        {
+            "start_s": s,
+            "end_s": e,
+            "duration_s": e - s,
+            "threshold": float(threshold),
+        }
         for s, e in merged
     ]
 
@@ -268,6 +283,11 @@ def segment_summary(
     Si la MDF no puede calcularse (segmento corto, NaN) se devuelve ``NaN``
     y el motivo queda en la clave ``"MDF_note"`` en lugar de ocultarse.
     """
+    x_filt = np.asarray(x_filt, dtype=float).ravel()
+    envelope = np.asarray(envelope, dtype=float).ravel()
+    if len(x_filt) != len(envelope):
+        raise ValueError("x_filt y envelope deben tener la misma longitud.")
+
     r = rms(x_filt)
     out = {
         "RMS": r,
@@ -279,7 +299,9 @@ def segment_summary(
         "MDF_note": "",
     }
     try:
-        out["MDF_Hz"] = median_frequency(x_filt, fs, nperseg=round(spectral_window_s * fs))
+        out["MDF_Hz"] = median_frequency(
+            x_filt, fs, nperseg=round(spectral_window_s * fs)
+        )
     except ValueError as exc:
         out["MDF_note"] = str(exc)
     return out
@@ -298,21 +320,44 @@ def window_sensitivity(
     estándar mide la variabilidad de la estimación; el número de puntos
     (``n``) resume la resolución temporal disponible.
     """
+    if not 0 <= overlap < 1:
+        raise ValueError("overlap debe estar en [0, 1).")
+
     rms_res: dict[float, dict] = {}
     for w in rms_windows_ms:
         try:
             y = moving_rms(x, fs, float(w))
             m, s = float(np.nanmean(y)), float(np.nanstd(y))
-            rms_res[float(w)] = {"mean": m, "std": s, "cv": s / m if m else float("nan"), "n": int(np.isfinite(y).sum())}
+            rms_res[float(w)] = {
+                "mean": m,
+                "std": s,
+                "cv": s / m if m else float("nan"),
+                "n": int(np.isfinite(y).sum()),
+            }
         except ValueError:
-            rms_res[float(w)] = {"mean": float("nan"), "std": float("nan"), "cv": float("nan"), "n": 0}
+            rms_res[float(w)] = {
+                "mean": float("nan"),
+                "std": float("nan"),
+                "cv": float("nan"),
+                "n": 0,
+            }
 
     mdf_res: dict[float, dict] = {}
     for w in mdf_windows_s:
         try:
             _, y = median_frequency_trend(x, fs, float(w), overlap)
             m, s = float(np.nanmean(y)), float(np.nanstd(y))
-            mdf_res[float(w)] = {"mean": m, "std": s, "cv": s / m if m else float("nan"), "n": int(np.isfinite(y).sum())}
+            mdf_res[float(w)] = {
+                "mean": m,
+                "std": s,
+                "cv": s / m if m else float("nan"),
+                "n": int(np.isfinite(y).sum()),
+            }
         except ValueError:
-            mdf_res[float(w)] = {"mean": float("nan"), "std": float("nan"), "cv": float("nan"), "n": 0}
+            mdf_res[float(w)] = {
+                "mean": float("nan"),
+                "std": float("nan"),
+                "cv": float("nan"),
+                "n": 0,
+            }
     return rms_res, mdf_res
