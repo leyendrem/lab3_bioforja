@@ -8,6 +8,24 @@ import plotly.graph_objects as go
 ACTIVATION_FILL = "rgba(46, 160, 67, 0.18)"
 
 
+def _matched_or_empty(x: Sequence[float], y: Sequence[float]) -> tuple[list, list]:
+    """Para series que deben compartir el mismo eje x (p. ej. cruda/filtrada/
+    envolvente sincronizadas en el tiempo): si x e y no tienen la misma longitud,
+    no se puede garantizar la correspondencia punto a punto, así que se devuelve
+    una traza vacía en vez de datos desalineados."""
+    if len(x) != len(y):
+        return [], []
+    return list(x), list(y)
+
+
+def _truncate_to_shortest(x: Sequence[float], y: Sequence[float]) -> tuple[list, list]:
+    """Para series independientes (una sola curva, sin otras series sincronizadas):
+    si x e y no coinciden en longitud, se recorta al tamaño común más corto en vez
+    de fallar o desalinear."""
+    n = min(len(x), len(y))
+    return list(x)[:n], list(y)[:n]
+
+
 def signal_figure(
     time: Sequence[float],
     raw: Sequence[float],
@@ -19,18 +37,20 @@ def signal_figure(
     y_title: str = "Amplitud EMG",
 ) -> go.Figure:
     fig = go.Figure()
-    #fig.add_trace(go.Scattergl(x=time, y=raw, name=raw_label, line=dict(width=1), opacity=0.45))
+    raw_x, raw_y = _matched_or_empty(time, raw)
     fig.add_trace(
         go.Scattergl(
-            x=time,
-            y=raw,
+            x=raw_x,
+            y=raw_y,
             name=raw_label,
             line={"width": 1},
             opacity=0.45,
         )
     )
-    fig.add_trace(go.Scattergl(x=time, y=filtered, name="Filtrada", line={"width": 1}))
-    fig.add_trace(go.Scattergl(x=time, y=envelope, name="Envolvente", line={"width": 2}))
+    filt_x, filt_y = _matched_or_empty(time, filtered)
+    fig.add_trace(go.Scattergl(x=filt_x, y=filt_y, name="Filtrada", line={"width": 1}))
+    env_x, env_y = _matched_or_empty(time, envelope)
+    fig.add_trace(go.Scattergl(x=env_x, y=env_y, name="Envolvente", line={"width": 2}))
 
     for seg in activation_segments or []:
         fig.add_vrect(
@@ -56,7 +76,8 @@ def trend_figure(
     y_title: str,
 ) -> go.Figure:
     """Tendencia temporal de una métrica (RMS móvil, MDF por ventanas...)."""
-    fig = go.Figure(go.Scatter(x=x, y=y, mode="lines+markers"))
+    x2, y2 = _truncate_to_shortest(x, y)
+    fig = go.Figure(go.Scatter(x=x2, y=y2, mode="lines+markers"))
     fig.update_layout(
         title=title,
         xaxis_title="Tiempo (s)",
@@ -73,7 +94,8 @@ def spectrum_figure(
     y_title: str = "PSD",
     log_y: bool = False,
 ) -> go.Figure:
-    fig = go.Figure(go.Scatter(x=freq, y=power, mode="lines"))
+    freq2, power2 = _truncate_to_shortest(freq, power)
+    fig = go.Figure(go.Scatter(x=freq2, y=power2, mode="lines"))
     fig.update_layout(
         title=title,
         xaxis_title="Frecuencia (Hz)",
