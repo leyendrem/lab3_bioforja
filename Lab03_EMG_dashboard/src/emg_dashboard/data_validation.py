@@ -4,13 +4,17 @@ from scipy.signal import welch
 
 
 def sampling_report(df: pd.DataFrame, fs: float) -> dict:
-    t = np.sort(df["time_s"].dropna().unique())
+    if fs <= 0:
+        raise ValueError("fs debe ser > 0")
+    t_all = np.sort(df["time_s"].dropna().to_numpy())
+    t = np.unique(t_all)
     dt = np.diff(t)
     positive = dt[dt > 0]
+    n_dup = int(len(t_all) - len(t))  # duplicados = total - únicos
     return {
         "fs_configured_or_estimated_hz": float(fs),
         "n_unique_times": len(t),
-        "duplicate_time_points": int(np.sum(dt == 0)),
+        "duplicate_time_points": n_dup,
         "median_dt_s": float(np.median(positive)) if len(positive) else float("nan"),
         "cv_dt": float(np.std(positive) / np.mean(positive)) if len(positive) and np.mean(positive) else float("nan"),
         "duration_s": float(t[-1] - t[0]) if len(t) > 1 else 0.0,
