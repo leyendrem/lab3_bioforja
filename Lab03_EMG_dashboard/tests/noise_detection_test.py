@@ -10,7 +10,7 @@ def audit_all_files_for_notch(data_dir: str | Path = "data/raw") -> None:
     de cuáles canales necesitan obligatoriamente el filtro Notch de 60 Hz.
     """
     data_dir = Path(data_dir)
-    tdf_files = sorted(list(data_dir.glob("*.tdf")))
+    tdf_files = sorted(data_dir.glob("*.tdf"))
     
     if not tdf_files:
         print(f"No se encontraron archivos en {data_dir}")
