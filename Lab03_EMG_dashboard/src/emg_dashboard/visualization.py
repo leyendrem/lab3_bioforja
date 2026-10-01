@@ -19,7 +19,16 @@ def signal_figure(
     y_title: str = "Amplitud EMG",
 ) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scattergl(x=time, y=raw, name=raw_label, line=dict(width=1), opacity=0.45))
+    #fig.add_trace(go.Scattergl(x=time, y=raw, name=raw_label, line=dict(width=1), opacity=0.45))
+    fig.add_trace(
+        go.Scattergl(
+            x=time,
+            y=raw,
+            name=raw_label,
+            line={"width": 1},
+            opacity=0.45,
+        )
+    )
     fig.add_trace(go.Scattergl(x=time, y=filtered, name="Filtrada", line={"width": 1}))
     fig.add_trace(go.Scattergl(x=time, y=envelope, name="Envolvente", line={"width": 2}))
 
