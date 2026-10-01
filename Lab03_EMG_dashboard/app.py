@@ -94,19 +94,7 @@ with st.sidebar:
     spectral_window_s = st.slider("Ventana espectral (s)", 0.5, 4.0, 2.0, 0.5)
     activation_threshold_multiplier = st.slider("Umbral activación × MAD", 1.0, 8.0, 3.0, 0.5)
     min_activation_s = st.slider("Duración mínima activación (s)", 0.05, 0.50, 0.10, 0.05)
-
     spectrum_log = st.checkbox("Espectro en escala logarítmica", value=False)
-
-    st.header("3 · Referencia MVC")
-    mvc_reference = st.number_input(
-        "RMS MVC de referencia",
-        min_value=0.0,
-        value=0.0,
-        step=1e-5,
-        format="%.6f",
-        help="Deje 0 si no tiene referencia.",
-    )
-    mvc_reference = None if mvc_reference <= 0 else float(mvc_reference)
 
 
 @st.cache_data(show_spinner="Generando registro demostrativo...")
@@ -166,6 +154,28 @@ sub = df[df["session"] == selected_session]
 channels = sorted(sub["channel"].unique())
 selected_channel = st.sidebar.selectbox("Músculo / canal", channels)
 ch = sub[sub["channel"] == selected_channel].sort_values("time_s").copy()
+
+# --- Referencia MVC dinámica ---
+max_signal_amp = float(ch["emg"].abs().max()) if not ch.empty else 1.0
+
+with st.sidebar:
+    st.header("3 · Referencia MVC")
+    usar_mvc_auto = st.checkbox("Estimar MVC con el pico de la señal", value=False)
+    
+    if usar_mvc_auto:
+        mvc_reference = max_signal_amp
+        st.info(f"Usando MVC estimada: {mvc_reference:.5f}")
+    else:
+        mvc_reference = st.number_input(
+            "RMS MVC de referencia",
+            min_value=0.0,
+            max_value=max_signal_amp * 2.0 if max_signal_amp > 0 else 1.0,
+            value=0.0,
+            step=max_signal_amp / 100.0 if max_signal_amp > 0 else 1e-4,
+            format="%.5f",
+            help="Ingresa el valor real de tu prueba o déjalo en 0 para omitir.",
+        )
+        mvc_reference = None if mvc_reference <= 0 else float(mvc_reference)
 
 min_time = float(ch["time_s"].min())
 max_time = float(ch["time_s"].max())
@@ -299,26 +309,6 @@ if activations:
     st.dataframe(pd.DataFrame(activations), use_container_width=True, hide_index=True)
 else:
     st.write("No se detectaron activaciones con el umbral actual.")
-
-with st.expander("Parámetros de análisis y justificación", expanded=False):
-    params = pd.DataFrame([
-        ["fs", fs, "Frecuencia del bloque EMG."],
-        ["Pasa-altas", FIXED_LOW_HZ, "Filtro fijo para reducir componentes lentas y artefactos de movimiento."],
-        ["Pasa-bajas", FIXED_HIGH_HZ, "Filtro fijo para conservar el contenido útil."],
-        ["Notch", f"{FIXED_USE_NOTCH} · {FIXED_NOTCH_HZ} Hz", "Desactivado por defecto."],
-        ["Envolvente", FIXED_ENVELOPE_HZ, "Filtro de envolvente fijo."],
-        ["Ventana RMS", rms_window_ms, "Compromiso temporal/estabilidad."],
-        ["Ventana espectral", spectral_window_s, "Requiere estacionariedad local."],
-        ["Umbral activación", f"mediana + {activation_threshold_multiplier}×MAD", "Heurística de detección."],
-        ["Duración mínima", min_activation_s, "Evita falsos positivos breves."],
-    ], columns=["Parámetro", "Valor", "Razón fisiológica/metodológica"])
-    params["Valor"] = params["Valor"].astype(str)
-    st.dataframe(params, use_container_width=True, hide_index=True)
-
-with st.expander("Calidad y trazabilidad"):
-    st.json(sampling_report(ch, fs))
-    st.json(channel_quality(ch["emg"].to_numpy()))
-    st.write("**Origen:**", meta.get("source"), "· **Formato:**", meta.get("format"))
 
 st.header("Vector de características para clasificación")
 feature_row = {
