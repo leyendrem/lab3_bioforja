@@ -132,7 +132,7 @@ try:
     else:
         st.info("Por favor, selecciona una muestra TDF o activa el modo demostrativo.")
         st.stop()
-except Exception as exc:
+except ValueError as exc:
     st.error(f"No fue posible cargar el registro: {exc}")
     st.stop()
 
@@ -209,7 +209,7 @@ try:
     )
     mascara = ((ch["time_s"] >= start) & (ch["time_s"] <= end)).to_numpy()
     stages = {nombre: valores[mascara] for nombre, valores in etapas_completas.items()}
-except Exception as exc:
+except ValueError as exc:
     st.error(f"No fue posible procesar el canal: {exc}")
     st.stop()
 
@@ -230,7 +230,7 @@ try:
         min_duration_s=min_activation_s,
         t0=inicio_fragmento,
     )
-except Exception as exc:
+except ValueError as exc:
     st.error(f"No se pudieron calcular las activaciones: {exc}")
     st.stop()
 
@@ -289,7 +289,7 @@ except ValueError as exc:
 try:
     t_mdf, y_mdf = median_frequency_trend(filtered, fs, spectral_window_s, t0=inicio_fragmento)
     col2.plotly_chart(trend_figure(t_mdf, y_mdf, "Frecuencia mediana", "MDF (Hz)"), use_container_width=True)
-except Exception as exc:
+except ValueError as exc:
     col2.warning(f"No se pudo calcular la tendencia espectral: {exc}")
 
 st.header("Espectro exploratorio")
