@@ -66,7 +66,7 @@ def moving_rms(x: np.ndarray, fs: float, window_ms: float = 200.0) -> np.ndarray
     if window_ms <= 0:
         raise ValueError("window_ms debe ser positivo.")
     a = np.asarray(x, dtype=float).ravel()
-    n = max(1, int(round(window_ms * fs / 1000.0)))
+    n = max(1, round(window_ms * fs / 1000.0))
     if n > len(a):
         raise ValueError(
             f"La ventana RMS ({window_ms:.0f} ms = {n} muestras) es mayor que "
@@ -160,7 +160,7 @@ def median_frequency_trend(
     if not 0 <= overlap < 1:
         raise ValueError("overlap debe estar en [0, 1).")
     a = np.asarray(x, dtype=float).ravel()
-    n = int(round(window_s * fs))
+    n = round(window_s * fs)
     if n < MIN_SPECTRAL_SAMPLES:
         raise ValueError("La ventana espectral es demasiado corta.")
     if len(a) < n:
@@ -168,7 +168,7 @@ def median_frequency_trend(
             f"El segmento ({len(a) / fs:.2f} s) es más corto que la ventana "
             f"espectral ({window_s:.2f} s): no hay tendencia que calcular."
         )
-    hop = max(1, int(round(n * (1 - overlap))))
+    hop = max(1, round(n * (1 - overlap)))
     times, values = [], []
     for start in range(0, len(a) - n + 1, hop):
         win = a[start : start + n]
@@ -198,7 +198,7 @@ def activation_threshold(
     _check_fs(fs)
     if len(env) < 3:
         raise ValueError("Señal insuficiente para detectar activaciones.")
-    n0 = min(len(env), max(1, int(round(baseline_seconds * fs))))
+    n0 = min(len(env), max(1, round(baseline_seconds * fs)))
     base = env[:n0]
     med = np.nanmedian(base)
     mad = np.nanmedian(np.abs(base - med))
@@ -277,7 +277,7 @@ def segment_summary(
         "MDF_note": "",
     }
     try:
-        out["MDF_Hz"] = median_frequency(x_filt, fs, nperseg=int(round(spectral_window_s * fs)))
+        out["MDF_Hz"] = median_frequency(x_filt, fs, nperseg=round(spectral_window_s * fs))
     except ValueError as exc:
         out["MDF_note"] = str(exc)
     return out
