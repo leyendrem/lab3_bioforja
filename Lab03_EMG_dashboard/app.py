@@ -299,7 +299,18 @@ f, pxx = welch(filtered, fs=fs, nperseg=min(len(filtered), max(16, round(spectra
 st.plotly_chart(spectrum_figure(f, pxx, y_title="PSD (unidad²/Hz)", log_y=spectrum_log), use_container_width=True)
 
 st.header("Sensibilidad a ventanas")
-rms_sens, mdf_sens = window_sensitivity(filtered, fs)
+rms_windows_to_compare = (rms_window_ms / 2, rms_window_ms, rms_window_ms * 2)
+mdf_windows_to_compare = (spectral_window_s / 2, spectral_window_s, spectral_window_s * 2)
+rms_sens, mdf_sens = window_sensitivity(
+    filtered,
+    fs,
+    rms_windows_ms=rms_windows_to_compare,
+    mdf_windows_s=mdf_windows_to_compare,
+)
+st.caption(
+    f"Comparando la ventana RMS elegida ({rms_window_ms:g} ms) contra la mitad y el doble; "
+    f"igual para la ventana espectral ({spectral_window_s:g} s)."
+)
 sens_rms = pd.DataFrame.from_dict(rms_sens, orient="index").reset_index().rename(columns={"index": "ventana_RMS_ms"})
 sens_mdf = pd.DataFrame.from_dict(mdf_sens, orient="index").reset_index().rename(columns={"index": "ventana_MDF_s"})
 cs1, cs2 = st.columns(2)
