@@ -148,8 +148,10 @@ if errores:
 fs = float(meta.get("fs"))
 nyquist = fs / 2
 
+# --- Sesión fija automática (sin mostrar selector de sesión) ---
 sessions = sorted(df["session"].unique())
-selected_session = st.sidebar.selectbox("Sesión", sessions)
+selected_session = sessions[0]
+
 sub = df[df["session"] == selected_session]
 channels = sorted(sub["channel"].unique())
 selected_channel = st.sidebar.selectbox("Músculo / canal", channels)
