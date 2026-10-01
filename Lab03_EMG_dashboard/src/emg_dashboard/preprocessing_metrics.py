@@ -13,12 +13,18 @@ def remove_dc(x: np.ndarray) -> np.ndarray:
     return x - np.nanmean(x)
 
 
-def bandpass_emg(x: np.ndarray, fs: float, low_hz: float, high_hz: float, order: int = 4) -> np.ndarray:
-    """Aplica un filtro pasabanda para conservar únicamente las frecuencias fisiológicas útiles del EMG."""
+def bandpass_emg(x, fs, low_hz, high_hz, order=4):
+    x = as_float(x).ravel()
+    if not np.isfinite(fs) or fs <= 0:
+        raise ValueError("fs debe ser un número positivo.")
     if not 0 < low_hz < high_hz < fs / 2:
         raise ValueError("Debe cumplirse 0 < low_hz < high_hz < fs/2.")
+    if len(x) < 3 * order + 1:  # o un mínimo razonable
+        raise ValueError(
+            f"Señal demasiado corta para filtrar ({len(x)} muestras)."
+        )
     sos = butter(order, [low_hz, high_hz], btype="bandpass", fs=fs, output="sos")
-    return sosfiltfilt(sos, as_float(x))
+    return sosfiltfilt(sos, x)
 
 
 def notch_filter(x: np.ndarray, fs: float, center_hz: float = 60.0, bandwidth_hz: float = 2.0, order: int = 2) -> np.ndarray:
